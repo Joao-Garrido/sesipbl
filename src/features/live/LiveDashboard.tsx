@@ -19,10 +19,12 @@ import { buildPhases, fmtMeters } from "@/lib/phases";
 import {
   bodyAngleCurve,
   exitPeakVelocity,
+  exitVelocityMean,
   exitPhasePoints,
   exitWindowMeters,
+  launchAnglePeak,
 } from "@/lib/analysis";
-import type { Attempt, AttemptMetrics, VelocityPoint } from "@/lib/types";
+import type { Attempt, AttemptMetrics, LiveFrame, VelocityPoint } from "@/lib/types";
 import { Card } from "@/shared/components/Card";
 import { StatCard } from "@/shared/components/StatCard";
 import { Header } from "@/shared/components/Header";
@@ -33,7 +35,6 @@ import { RawStreamTicker } from "./RawStreamTicker";
 import { PhaseIndicator } from "./PhaseIndicator";
 import { SplitsTable } from "./SplitsTable";
 import { DualMetricChart } from "./DualMetricChart";
-import { AngleGauge } from "./AngleGauge";
 import { ExitVelocityChart } from "@/features/analysis/ExitVelocityChart";
 import { BodyAngleChart } from "@/features/analysis/BodyAngleChart";
 
@@ -63,12 +64,27 @@ export function LiveDashboard() {
   const [attemptNum, setAttemptNum] = useState(0);
   const [distance, setDistance] = useState(100); // distância-alvo da prova (m)
   const startedAtRef = useRef<number>(0);
-  const launchAngleRef = useRef<number | null>(null); // ângulo ao cruzar 10m (saída de bloco)
-  const angleMaxRef = useRef<number>(0); // pico do ângulo na tentativa
+  // Amostras de Angulo_graus da tentativa → ângulo de largada ÚNICO via find_peaks
+  // (reproduz angulo_fio.py). Valor congela no pico encontrado, não muda ao vivo.
+  const angleSamplesRef = useRef<number[]>([]);
+  const [launchAngle, setLaunchAngle] = useState(0);
 
   const athlete = athletes.find((a) => a.id === athleteId);
-  const { isLive, current, curve, rawHistory, hardware, calibrating } = useAutoLiveSession(attemptId, athleteId);
+  const { isLive, current: liveCurrent, curve: liveCurve, rawHistory: liveRaw, hardware, calibrating } = useAutoLiveSession(attemptId, athleteId);
   const bridge = useBridgeStatus();
+
+  // Congela a última tentativa: ao encerrar, o hook zera o stream (attemptId=null).
+  // Guardamos um snapshot para o treinador revisar até iniciar outra ou clicar em limpar.
+  const [frozen, setFrozen] = useState<{
+    current: LiveFrame | null;
+    curve: VelocityPoint[];
+    rawHistory: LiveFrame[];
+  } | null>(null);
+
+  // Valores exibidos: snapshot congelado tem prioridade sobre o stream vivo (vazio pós-stop).
+  const current = frozen ? frozen.current : liveCurrent;
+  const curve = frozen ? frozen.curve : liveCurve;
+  const rawHistory = frozen ? frozen.rawHistory : liveRaw;
 
   // Sinal perdido durante a captura: socket caiu (isLive=false) OU parou de chegar
   // frame (>2s → hardware "fail"). Só depois do 1º frame, pra não piscar no início.
@@ -121,23 +137,21 @@ export function LiveDashboard() {
   const exitWindow = useMemo(() => exitWindowMeters(distance), [distance]);
   const exitPts = useMemo(() => exitPhasePoints(chartCurve, distance), [chartCurve, distance]);
   const exitPeak = useMemo(() => exitPeakVelocity(curve, distance), [curve, distance]);
+  // Vel. média dos primeiros 200 pontos coletados (reproduz ajuste_plot_vel.py: N_INICIO=200)
+  const exitMean = useMemo(() => exitVelocityMean(curve), [curve]);
 
   // Curva do ângulo do corpo (modelo de inclinação por aceleração — ver lib/analysis).
   const bodyAngle = useMemo(() => bodyAngleCurve(chartCurve), [chartCurve]);
   const currentBodyAngle = bodyAngle.length ? bodyAngle[bodyAngle.length - 1].angle : 90;
 
-  // Captura o ângulo de largada: o valor acumulado ao CRUZAR 10m (fim da saída de
-  // bloco). O ângulo vem da integração do giroscópio (começa em 0 e cresce), então
-  // capturar no início daria ~0 — por isso pegamos ao fim da saída. Guarda o pico também.
+  // Ângulo de largada = valor ÚNICO obtido por find_peaks sobre o sinal de
+  // Angulo_graus da tentativa (pico de maior amplitude — ver angulo_fio.py).
+  // Acumula as amostras e recalcula o pico; o valor congela quando achado.
   useEffect(() => {
     if (!attemptId || !current || !Number.isFinite(current.angle)) return;
-    if (current.angle > angleMaxRef.current) angleMaxRef.current = current.angle;
-    // marca da "saída": 10m em provas longas, ou metade da prova nas curtas (10/20m)
-    const launchMark = Math.min(10, distance * 0.5);
-    if (launchAngleRef.current === null && (current.displacement ?? 0) >= launchMark) {
-      launchAngleRef.current = current.angle;
-    }
-  }, [current, attemptId, distance]);
+    angleSamplesRef.current.push(current.angle);
+    setLaunchAngle(launchAnglePeak(angleSamplesRef.current));
+  }, [current, attemptId]);
 
   // Auto-stop quando atinge a distância-alvo (10/20/100/custom)
   useEffect(() => {
@@ -160,8 +174,9 @@ export function LiveDashboard() {
       return; // não inicia visualização se o controle falhou
     }
     startedAtRef.current = Date.now();
-    launchAngleRef.current = null;
-    angleMaxRef.current = 0;
+    angleSamplesRef.current = [];
+    setLaunchAngle(0);
+    setFrozen(null); // descongela: nova tentativa volta ao stream vivo
     setAttemptNum((n) => n + 1);
     setAttemptId(newAttemptId);
   }
@@ -183,8 +198,8 @@ export function LiveDashboard() {
     const existing = getAttemptsBySession(sessionId);
     const prior = existing.find((a) => a.id === attemptId);
     const numero = prior ? prior.numero : existing.length + 1;
-    // ângulo de largada: o capturado na saída; senão o pico; senão o atual
-    const startAngle = +(launchAngleRef.current ?? angleMaxRef.current ?? current?.angle ?? 0).toFixed(1);
+    // ângulo de largada: valor ÚNICO via find_peaks (pico de maior amplitude — angulo_fio.py)
+    const startAngle = +launchAngle.toFixed(1);
     const firstTimeAt = (m: number) => full.find((p) => (p.d ?? 0) >= m)?.t;
 
     const metrics: AttemptMetrics = {
@@ -195,10 +210,6 @@ export function LiveDashboard() {
       t30m: firstTimeAt(30),
       t100m: firstTimeAt(100),
       tFinal: firstTimeAt(distance), // tempo até a distância-alvo da prova
-      consistency:
-        athlete?.referenciaVelocidade && athlete.referenciaVelocidade > 0
-          ? Math.min(100, Math.round((peakVelocity / athlete.referenciaVelocidade) * 100))
-          : undefined,
     };
 
     const attempt: Attempt = {
@@ -222,6 +233,8 @@ export function LiveDashboard() {
 
   async function stopAttempt() {
     persistAttempt(); // salva ANTES de limpar o stream (setAttemptId(null) zera a curva)
+    // congela os valores vivos para o treinador revisar (sobrevive ao setAttemptId(null))
+    setFrozen({ current: liveCurrent, curve: liveCurve, rawHistory: liveRaw });
     setAttemptId(null);
     try {
       await stopAttemptControl();
@@ -230,6 +243,7 @@ export function LiveDashboard() {
     }
   }
   function resetAttempt() {
+    setFrozen(null); // limpa o snapshot → tela volta ao estado vazio
     setAttemptId(null);
     setAttemptNum(0);
   }
@@ -335,13 +349,12 @@ export function LiveDashboard() {
           <Chronometer elapsed={current?.elapsed ?? 0} isLive={isLive} />
           <StatCard label="Velocidade" value={current?.velocity ?? 0} unit=" m/s" reference={athlete?.referenciaVelocidade} large icon={<HiOutlineBolt className="w-5 h-5" />} />
           <StatCard label="Deslocamento" value={(current?.displacement ?? 0).toFixed(2)} unit=" m" reference={distance} large icon={<HiOutlineArrowLongRight className="w-5 h-5" />} />
-          <StatCard label="Ângulo" value={current?.angle ?? 0} unit="°" reference={athlete?.referenciaAngulo} large icon={<HiOutlineCubeTransparent className="w-5 h-5" />} />
+          <StatCard label="Ângulo de Largada" value={launchAngle} unit="°" reference={athlete?.referenciaAngulo} large icon={<HiOutlineCubeTransparent className="w-5 h-5" />} />
         </motion.div>
 
-        <motion.div variants={itemFade} className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <motion.div variants={itemFade}>
           <Card
             title="Velocidade × Deslocamento"
-            className="lg:col-span-2"
             headerRight={
               <div className="flex items-center gap-2">
                 <Badge variant="primary" size="sm">{curve.length} pts</Badge>
@@ -352,13 +365,6 @@ export function LiveDashboard() {
             }
           >
             <DualMetricChart data={chartCurve} reference={athlete?.referenciaVelocidade} peakVelTime={markers.peakVelTime} />
-          </Card>
-          <Card title="Ângulo na Largada">
-            <AngleGauge value={current?.angle ?? 0} reference={athlete?.referenciaAngulo ?? 45} />
-            <p className="text-[11px] text-text-muted mt-3 text-center leading-relaxed">
-              Ângulo ao vivo entre a IMU da carretilha e a do atleta (suavizado).<br/>
-              Zona ideal: <span className="font-semibold">{athlete?.referenciaAngulo}° ± 5°</span>
-            </p>
           </Card>
         </motion.div>
 
@@ -379,14 +385,23 @@ export function LiveDashboard() {
               Velocidade instantânea nos primeiros 10% da prova ({fmtMeters(exitWindow)} m) — a fase de saída do bloco, a mais importante para a arrancada.
             </p>
           </Card>
-          <StatCard
-            label="Pico de saída (1ºs 10%)"
-            value={exitPeak}
-            unit=" m/s"
-            reference={athlete?.referenciaVelocidade}
-            large
-            icon={<HiOutlineBolt className="w-5 h-5" />}
-          />
+          <div className="space-y-3">
+            <StatCard
+              label="Vel. média saída (200 pts)"
+              value={exitMean}
+              unit=" m/s"
+              reference={athlete?.referenciaVelocidade}
+              large
+              icon={<HiOutlineBolt className="w-5 h-5" />}
+            />
+            <StatCard
+              label="Pico de saída (1ºs 10%)"
+              value={exitPeak}
+              unit=" m/s"
+              reference={athlete?.referenciaVelocidade}
+              icon={<HiOutlineBolt className="w-5 h-5" />}
+            />
+          </div>
         </motion.div>
 
         {/* Ângulo do corpo ao longo da corrida (modelo de inclinação por aceleração) */}
@@ -425,7 +440,7 @@ export function LiveDashboard() {
 
         <motion.div variants={itemFade} className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2">
-            <Card title={LIVE_SOURCE === "local-ws" ? "Stream RAW · ESP32 → Local WS" : "Stream RAW · ESP32 → Firebase"} headerRight={<Badge variant="critical" size="sm" dot>{hardware.latencyMs}ms latency</Badge>} noPadding>
+            <Card title="Stream RAW · ESP32" noPadding>
               <div className="p-3">
                 <RawStreamTicker frames={rawHistory} />
               </div>
@@ -436,25 +451,13 @@ export function LiveDashboard() {
           </Card>
         </motion.div>
 
-        <motion.div variants={itemFade} className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {LIVE_SOURCE === "local-ws" ? (
-            <>
-              <MicroStat label="Pulsos encoder" value={current?.encoderPulses ?? 0} unit="" mono />
-              <MicroStat label="Rotações" value={(current?.encoderRpm ?? 0).toFixed(0)} unit=" rpm" />
-              <MicroStat label="Deslocamento" value={(current?.displacement ?? 0).toFixed(2)} unit=" m" />
-              <MicroStat label="Latência" value={hardware.latencyMs} unit=" ms" />
-            </>
-          ) : (
-            <>
-              <MicroStat label="Cadência" value={current?.cadence ?? 0} unit=" passos/min" />
-              <MicroStat label="Pulsos encoder" value={current?.encoderPulses ?? 0} unit="" mono />
-              <MicroStat label="Rotações" value={(current?.encoderRpm ?? 0).toFixed(0)} unit=" rpm" />
-              <MicroStat label="CPU ESP32" value={(current?.cpuTempC ?? 0).toFixed(1)} unit=" °C" />
-            </>
-          )}
+        <motion.div variants={itemFade} className="grid grid-cols-3 gap-3">
+          <MicroStat label="Pulsos encoder" value={current?.encoderPulses ?? 0} unit="" mono />
+          <MicroStat label="Rotações" value={(current?.encoderRpm ?? 0).toFixed(0)} unit=" rpm" />
+          <MicroStat label="Deslocamento" value={(current?.displacement ?? 0).toFixed(2)} unit=" m" />
         </motion.div>
 
-        {!attemptId && (
+        {!attemptId && !frozen && (
           <motion.div variants={itemFade}>
             <Card className="border-dashed text-center bg-white/40">
               <p className="text-sm text-text-muted">
@@ -486,12 +489,7 @@ function BridgePill({
     );
   }
   if (!isFirebaseMode) {
-    return (
-      <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-amber-100 text-amber-800 border border-amber-200">
-        <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-        Modo Demo (sem Firebase)
-      </span>
-    );
+    return null;
   }
   const color = isOnline
     ? "bg-emerald-100 text-emerald-800 border-emerald-200"

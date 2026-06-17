@@ -1,7 +1,7 @@
 "use client";
 // Indicador de fase atual baseado em deslocamento. As fases dependem da distância
 // da prova (ver lib/phases): longas (>=60m) nomeadas, curtas (<60m) só com a faixa.
-import { buildPhases, fmtMeters } from "@/lib/phases";
+import { buildPhases } from "@/lib/phases";
 
 interface Props {
   displacement: number;
@@ -13,26 +13,20 @@ export function PhaseIndicator({ displacement, target = 100 }: Props) {
   const phases = buildPhases(target);
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <span className="text-[10px] uppercase tracking-widest text-text-muted font-bold">Fase atual</span>
-        <span className="text-sm font-bold tabular-nums">{displacement.toFixed(2)}m / {target}m</span>
-      </div>
       <div className="relative h-9 rounded-lg overflow-hidden border border-border bg-white">
         {phases.map((p) => {
           const active = displacement >= p.lo && displacement < p.hi;
           return (
             <div
               key={`${p.lo}-${p.hi}`}
-              className={`absolute top-0 bottom-0 flex items-center justify-center text-[10px] font-bold uppercase tracking-wider transition-all ${active ? "text-white shadow-inner" : "text-white/50"}`}
+              className={`absolute top-0 bottom-0 transition-all ${active ? "shadow-inner" : ""}`}
               style={{
                 left: `${(p.lo / target) * 100}%`,
                 width: `${((p.hi - p.lo) / target) * 100}%`,
                 background: p.color,
                 opacity: active ? 1 : 0.3,
               }}
-            >
-              {p.label || `${fmtMeters(p.hi)}m`}
-            </div>
+            />
           );
         })}
         {/* Position pin */}
