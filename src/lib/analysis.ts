@@ -53,6 +53,77 @@ export interface BodyAnglePoint {
 // `a` é a derivada da velocidade do encoder. Como a velocidade vem quantizada (~10 Hz),
 // a aceleração crua é ruidosa; por isso `a` é estimada por REGRESSÃO LINEAR de v×t numa
 // janela de ±windowS em torno de cada ponto (inclinação da reta = aceleração suavizada).
+// ── findPeaks ───────────────────────────────────────────────────────────────
+// Equivalente simplificado do scipy.signal.find_peaks: retorna os ÍNDICES dos
+// máximos locais (valor estritamente maior que ambos os vizinhos).
+export function findPeaks(signal: number[]): number[] {
+  const peaks: number[] = [];
+  for (let i = 1; i < signal.length - 1; i++) {
+    if (signal[i] > signal[i - 1] && signal[i] > signal[i + 1]) peaks.push(i);
+  }
+  return peaks;
+}
+
+// Ângulo da largada a partir do sinal bruto de Angulo_graus (frame a frame).
+// Reproduz angulo_fio.py: find_peaks no sinal e pega o pico de MAIOR amplitude.
+// Valor ÚNICO — encontrado uma vez na corrida, não muda. Sem pico interno,
+// cai no máximo global do sinal.
+export function launchAnglePeak(angles: number[]): number {
+  if (angles.length === 0) return 0;
+  const peaks = findPeaks(angles);
+  if (peaks.length === 0) {
+    return angles.reduce((m, a) => (a > m ? a : m), angles[0]);
+  }
+  let bestIdx = peaks[0];
+  for (const idx of peaks) {
+    if (angles[idx] > angles[bestIdx]) bestIdx = idx;
+  }
+  return angles[bestIdx];
+}
+
+// ── Ângulo de saída (findPeaks) ─────────────────────────────────────────────
+// Reproduz o algoritmo do angulo_fio.py: aplica bodyAngleCurve (que já suaviza
+// via regressão — equivale ao filtro passa-baixa do Python), encontra todos os
+// picos e retorna o MAIOR (ângulo de saída do bloco).
+export function exitAnglePeak(curve: VelocityPoint[]): number {
+  const body = bodyAngleCurve(curve);
+  if (body.length < 3) return 0;
+  const angles = body.map((p) => p.angle);
+  const peaks = findPeaks(angles);
+  if (peaks.length === 0) return 0;
+  let bestIdx = peaks[0];
+  for (const idx of peaks) {
+    if (angles[idx] > angles[bestIdx]) bestIdx = idx;
+  }
+  return angles[bestIdx];
+}
+
+// ── Velocidade de saída (média dos primeiros N pontos) ──────────────────────
+// Reproduz o ajuste_plot_vel.py: N_INICIO = 200, vel_saida = média dos
+// primeiros 200 valores de velocidade coletados.
+const N_EXIT_POINTS = 200;
+export function exitVelocityMean(curve: VelocityPoint[], n = N_EXIT_POINTS): number {
+  const pts = curve.slice(0, n);
+  if (pts.length === 0) return 0;
+  return pts.reduce((s, p) => s + p.v, 0) / pts.length;
+}
+
+// ── Repetibilidade entre tentativas (consistência real) ────────────────────
+// Mede o quanto as tentativas de uma sessão se PARECEM entre si, via coeficiente
+// de variação (CV = desvio-padrão populacional / média). Score = (1 - CV) em %.
+//   - tentativas idênticas → CV 0 → 100% (perfeitamente repetível)
+//   - quanto mais dispersas → menor o score (piso em 0)
+// É métrica de SESSÃO: precisa de ≥2 valores. Retorna null quando não dá pra medir
+// (menos de 2 tentativas, ou média ≤ 0 que tornaria o CV indefinido/sem sentido).
+export function repeatabilityScore(values: number[]): number | null {
+  if (values.length < 2) return null;
+  const mean = values.reduce((s, v) => s + v, 0) / values.length;
+  if (mean <= 0) return null;
+  const variance = values.reduce((s, v) => s + (v - mean) ** 2, 0) / values.length;
+  const cv = Math.sqrt(variance) / mean;
+  return Math.max(0, Math.min(100, Math.round((1 - cv) * 100)));
+}
+
 export function bodyAngleCurve(curve: VelocityPoint[], windowS = 0.35): BodyAnglePoint[] {
   const pts = curve
     .filter((p) => Number.isFinite(p.t) && Number.isFinite(p.v))

@@ -9,7 +9,7 @@ import {
   HiOutlineClock,
   HiOutlinePlay,
   HiOutlineDocumentArrowDown,
-  HiOutlineFire,
+  HiOutlineRocketLaunch,
 } from "react-icons/hi2";
 import Link from "next/link";
 import { Header } from "@/shared/components/Header";
@@ -21,9 +21,6 @@ import { useAthletes } from "@/hooks/useAthletes";
 import { useAthleteStats } from "@/hooks/useAthleteStats";
 import { WelcomeHeader } from "./WelcomeHeader";
 import { ProgressChart } from "./ProgressChart";
-import { PhaseRadial } from "./PhaseRadial";
-import { AIInsightsCard } from "./AIInsightsCard";
-import { AthleteLeaderboard } from "./AthleteLeaderboard";
 import { UpcomingSessions } from "./UpcomingSessions";
 import { RecentAttempts } from "./RecentAttempts";
 import { AthleteSwitcher } from "./AthleteSwitcher";
@@ -58,7 +55,7 @@ export function CoachDashboard() {
 
   const athlete = athletes.find((a) => a.id === athleteId);
   const stats = useAthleteStats(athleteId);
-  const { history, attemptSeries, insights, bio, prs, phaseScores, leaderboard, todayAttempts: attempts } = stats;
+  const { history, attemptSeries, bio, prs, todayAttempts: attempts } = stats;
 
   const last = history[history.length - 1];
   const prev = history[history.length - 2] ?? history[0]; // sessão imediatamente anterior
@@ -68,10 +65,12 @@ export function CoachDashboard() {
     const pct = (a: number, b: number) => (b > 0 ? ((a - b) / b) * 100 : 0);
     return {
       sparkVel: history.map((h) => h.peakVelocity),
-      sparkAng: history.map((h) => h.avgAngle),
+      sparkExitVel: history.map((h) => h.exitVelocity),
+      sparkAng: history.map((h) => h.collectedAngle),
       sparkCons: history.map((h) => h.consistency),
       deltaVel: pct(last.peakVelocity, prev.peakVelocity),
-      deltaAng: pct(last.avgAngle, prev.avgAngle),
+      deltaExitVel: pct(last.exitVelocity, prev.exitVelocity),
+      deltaAng: pct(last.collectedAngle, prev.collectedAngle),
       deltaCons: last.consistency - prev.consistency,
     };
   }, [history, last, prev]);
@@ -95,13 +94,13 @@ export function CoachDashboard() {
   };
   const emptySummary = {
     id: "", date: "", label: "—",
-    peakVelocity: 0, avgAngle: 0,
+    peakVelocity: 0, exitVelocity: 0, exitAngle: 0, collectedAngle: 0,
     bestT100m: null, consistency: 0, attemptsCount: 0,
   };
   const safeLast = last ?? emptySummary;
   const safeMetrics = metrics ?? {
-    sparkVel: [], sparkAng: [], sparkCons: [],
-    deltaVel: 0, deltaAng: 0, deltaCons: 0,
+    sparkVel: [], sparkExitVel: [], sparkAng: [], sparkCons: [],
+    deltaVel: 0, deltaExitVel: 0, deltaAng: 0, deltaCons: 0,
   };
 
   return (
@@ -170,8 +169,18 @@ export function CoachDashboard() {
             />
             <KPICard
               tone="wine"
-              title="Ângulo Médio"
-              value={safeLast.avgAngle.toFixed(1) + "°"}
+              title="Velocidade de Saída"
+              value={safeLast.exitVelocity.toFixed(2)}
+              unit="m/s"
+              delta={safeMetrics.deltaExitVel}
+              deltaLabel="vs anterior"
+              sparklineData={safeMetrics.sparkExitVel}
+              icon={<HiOutlineRocketLaunch className="w-4 h-4" />}
+            />
+            <KPICard
+              tone="wine"
+              title="Ângulo de Saída"
+              value={safeLast.collectedAngle.toFixed(1) + "°"}
               delta={safeMetrics.deltaAng}
               deltaLabel="vs anterior"
               sparklineData={safeMetrics.sparkAng}
@@ -190,11 +199,10 @@ export function CoachDashboard() {
           </div>
         </motion.section>
 
-        {/* Progress chart + Phase scores */}
-        <motion.section variants={itemFade} className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Progress chart */}
+        <motion.section variants={itemFade}>
           <Card
             title={progressView === "sessao" ? "Progresso por Sessão" : "Progresso por Tentativa"}
-            className="lg:col-span-2"
             headerRight={
               <div className="flex items-center gap-2 flex-wrap">
                 {/* Sessão x Tentativa */}
@@ -239,19 +247,6 @@ export function CoachDashboard() {
                 : "Um ponto por tentativa, na ordem em que foram feitas."}
             </p>
           </Card>
-
-          <Card title="Velocidade por Fase">
-            {phaseScores.length > 0 ? (
-              <>
-                <PhaseRadial phases={phaseScores} />
-                <p className="text-[11px] text-text-muted mt-3 leading-relaxed">
-                  Velocidade média de <span className="font-semibold">{safeAthlete.nome.split(" ")[0]}</span> em cada faixa da prova (melhor tentativa).
-                </p>
-              </>
-            ) : (
-              <p className="text-sm text-text-muted text-center py-10">Sem tentativas ainda.</p>
-            )}
-          </Card>
         </motion.section>
 
         {/* Training load + PRs */}
@@ -269,14 +264,8 @@ export function CoachDashboard() {
           </Card>
         </motion.section>
 
-        {/* Insights + leaderboard + recent attempts */}
-        <motion.section variants={itemFade} className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-1">
-            <AIInsightsCard insights={insights} />
-          </div>
-          <Card title="Ranking Geral" headerRight={<Badge variant="primary" size="sm">{leaderboard.length}</Badge>}>
-            <AthleteLeaderboard data={leaderboard} />
-          </Card>
+        {/* Recent attempts */}
+        <motion.section variants={itemFade}>
           <Card title="Tentativas — Sessão Atual" headerRight={<Badge variant="critical" size="sm" dot>Ao vivo</Badge>}>
             {attempts.length > 0 ? (
               <RecentAttempts attempts={attempts} />

@@ -8,10 +8,9 @@ interface Props {
 }
 
 export function Chronometer({ elapsed, isLive }: Props) {
-  const totalMs = Math.max(0, elapsed * 1000);
-  const min = Math.floor(totalMs / 60000);
-  const sec = Math.floor((totalMs % 60000) / 1000);
-  const cs = Math.floor((totalMs % 1000) / 10); // centésimos
+  const totalS = Math.max(0, elapsed);
+  const sec = Math.floor(totalS);
+  const cs = Math.floor((totalS - sec) * 100); // centésimos
 
   return (
     <motion.div
@@ -35,15 +34,12 @@ export function Chronometer({ elapsed, isLive }: Props) {
         </div>
         <div className="flex items-baseline gap-1 font-mono-num">
           <span className="text-5xl font-black tracking-tight tabular-nums">
-            {String(min).padStart(2, "0")}
-          </span>
-          <span className="text-3xl text-white/40 font-bold">:</span>
-          <span className="text-5xl font-black tracking-tight tabular-nums">
-            {String(sec).padStart(2, "0")}
+            {String(sec)}
           </span>
           <span className="text-2xl text-sesi-red-300 font-bold ml-0.5 tabular-nums">
             .{String(cs).padStart(2, "0")}
           </span>
+          <span className="text-xl text-white/40 font-bold ml-1">s</span>
         </div>
       </div>
     </motion.div>

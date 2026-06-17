@@ -39,7 +39,7 @@ export function attemptsToCsv(attempts: Attempt[], info: (athleteId: string) => 
     "Atleta", "Categoria", "Data", "Hora", "Prova (m)", "Tentativa", "Status", "Deslocamento (m)",
     "Tempo (s)", "Vel. pico (m/s)", "Vel. pico (km/h)", "Vel. pico saída 10% (m/s)", "Vel. média (m/s)",
     ...splits.map((m) => `t ${m}m (s)`),
-    "Ângulo largada (°)", "Desvio ângulo (°)", "Consistência (%)",
+    "Ângulo largada (°)", "Desvio ângulo (°)",
   ];
 
   const rows = attempts.map((a) => {
@@ -62,7 +62,6 @@ export function attemptsToCsv(attempts: Attempt[], info: (athleteId: string) => 
       num(tempo), num(peak), num(peak * 3.6), num(exitPeak), num(velMedia),
       ...splits.map((m) => num(splitAt(a, m))),
       num(a.metrics.startAngle, 1), num(desvio, 1),
-      a.metrics.consistency != null ? String(a.metrics.consistency) : "",
     ];
   });
 
@@ -88,6 +87,24 @@ export function exitPhaseToCsv(attempt: Attempt, info: (athleteId: string) => Cs
   const rows = pts.map((p) => [
     esc(i.nome), esc(i.categoria), String(prova), String(attempt.numero),
     num(p.t, 3), num(p.d ?? 0, 3), num(p.v), num(p.v * 3.6), num(angleByT.get(p.t) ?? null, 1),
+  ]);
+  return [header.map(esc), ...rows].map((r) => r.join(";")).join("\r\n");
+}
+
+// CSV bruto da curva de velocidade de uma tentativa — todos os pontos do encoder
+// (tempo, deslocamento, velocidade, aceleração). O treinador usa para análise
+// externa ou re-processamento em Python.
+export function rawCurveToCsv(attempt: Attempt, info: (athleteId: string) => CsvAthleteInfo): string {
+  const i = info(attempt.athleteId);
+  const prova = attempt.distance ?? 100;
+  const pts = attempt.velocityCurve;
+  const header = [
+    "Atleta", "Categoria", "Prova (m)", "Tentativa",
+    "Tempo (s)", "Deslocamento (m)", "Velocidade (m/s)", "Aceleração (m/s²)",
+  ];
+  const rows = pts.map((p) => [
+    esc(i.nome), esc(i.categoria), String(prova), String(attempt.numero),
+    num(p.t, 4), num(p.d ?? 0, 4), num(p.v, 4), num(p.a ?? 0, 4),
   ]);
   return [header.map(esc), ...rows].map((r) => r.join(";")).join("\r\n");
 }

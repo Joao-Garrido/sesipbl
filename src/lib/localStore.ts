@@ -10,11 +10,13 @@
 // SSR-safe: todas as funções guardam `window`.
 
 import { mockAthletes } from "./mock";
+import type { CalibrationMode } from "./calibration";
 import type { Athlete, Attempt, Session } from "./types";
 
 const KEYS = {
   athletes: "bel-grupo:athletes:v1",
   attempts: "bel-grupo:attempts:v1",
+  calibration: "bel-grupo:calibration:v1",
 } as const;
 
 const CHANGE_EVENT = "bel-grupo:store-change";
@@ -221,6 +223,28 @@ export function getSessions(): Session[] {
 
 export function getSessionsByAthlete(athleteId: string): Session[] {
   return getSessions().filter((s) => s.athleteId === athleteId);
+}
+
+// ----------------------------------------------------------------
+// Calibracao (preferencia do treinador, por maquina)
+// ----------------------------------------------------------------
+// Padrao vem do env (NEXT_PUBLIC_CALIBRATION_MODE); a escolha na plataforma
+// (localStorage) sobrepoe. So fica no localStorage — nao vai pro store.json.
+const ENV_CALIBRATION_DEFAULT: CalibrationMode =
+  process.env.NEXT_PUBLIC_CALIBRATION_MODE === "frontend" ? "frontend" : "firmware";
+
+export function getCalibrationMode(): CalibrationMode {
+  if (!hasWindow()) return ENV_CALIBRATION_DEFAULT;
+  // writeLocal serializa via JSON.stringify, entao a leitura tem de fazer JSON.parse
+  // (readRaw) para casar; comparar a string crua quebraria por causa das aspas.
+  const mode = readRaw<CalibrationMode>(KEYS.calibration, ENV_CALIBRATION_DEFAULT);
+  return mode === "frontend" || mode === "firmware" ? mode : ENV_CALIBRATION_DEFAULT;
+}
+
+export function setCalibrationMode(mode: CalibrationMode): void {
+  if (!hasWindow()) return;
+  writeLocal(KEYS.calibration, mode);
+  window.dispatchEvent(new Event(CHANGE_EVENT)); // hooks/UI re-leem na hora
 }
 
 // ----------------------------------------------------------------

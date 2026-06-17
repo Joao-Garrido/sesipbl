@@ -22,6 +22,10 @@ import { PhaseProfile } from "./PhaseProfile";
 import { ExitVelocityChart } from "@/features/analysis/ExitVelocityChart";
 import { BodyAngleChart } from "@/features/analysis/BodyAngleChart";
 import { HiOutlineDocumentArrowDown, HiOutlineTableCells } from "react-icons/hi2";
+import {
+  ResponsiveContainer, LineChart, Line, XAxis, YAxis,
+  CartesianGrid, Tooltip as RTooltip,
+} from "recharts";
 
 type Scope = "sel" | "sessao" | "todas";
 
@@ -355,6 +359,45 @@ export function SessionReport() {
                 </p>
               </Card>
             </div>
+
+            {/* Gráficos: vel×tempo, vel×distância, dist×tempo */}
+            {featured && featured.velocityCurve.length > 2 && (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <Card title={`Velocidade × Tempo · T${featured.numero}`}>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <LineChart data={featured.velocityCurve}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                      <XAxis dataKey="t" tick={{ fontSize: 10 }} label={{ value: "Tempo (s)", position: "insideBottomRight", offset: -2, fontSize: 10 }} />
+                      <YAxis tick={{ fontSize: 10 }} label={{ value: "m/s", angle: -90, position: "insideLeft", fontSize: 10 }} />
+                      <RTooltip formatter={(v: number) => [`${v.toFixed(2)} m/s`, "Velocidade"]} labelFormatter={(t: number) => `${Number(t).toFixed(2)} s`} />
+                      <Line type="monotone" dataKey="v" stroke="#2D4F4F" dot={false} strokeWidth={1.5} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </Card>
+                <Card title={`Velocidade × Distância · T${featured.numero}`}>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <LineChart data={featured.velocityCurve}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                      <XAxis dataKey="d" tick={{ fontSize: 10 }} label={{ value: "Distância (m)", position: "insideBottomRight", offset: -2, fontSize: 10 }} />
+                      <YAxis tick={{ fontSize: 10 }} label={{ value: "m/s", angle: -90, position: "insideLeft", fontSize: 10 }} />
+                      <RTooltip formatter={(v: number) => [`${v.toFixed(2)} m/s`, "Velocidade"]} labelFormatter={(d: number) => `${Number(d ?? 0).toFixed(2)} m`} />
+                      <Line type="monotone" dataKey="v" stroke="#B91C1C" dot={false} strokeWidth={1.5} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </Card>
+                <Card title={`Distância × Tempo · T${featured.numero}`}>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <LineChart data={featured.velocityCurve}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                      <XAxis dataKey="t" tick={{ fontSize: 10 }} label={{ value: "Tempo (s)", position: "insideBottomRight", offset: -2, fontSize: 10 }} />
+                      <YAxis tick={{ fontSize: 10 }} label={{ value: "m", angle: -90, position: "insideLeft", fontSize: 10 }} />
+                      <RTooltip formatter={(v: number) => [`${Number(v ?? 0).toFixed(2)} m`, "Distância"]} labelFormatter={(t: number) => `${Number(t).toFixed(2)} s`} />
+                      <Line type="monotone" dataKey="d" stroke="#1D4ED8" dot={false} strokeWidth={1.5} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </Card>
+              </div>
+            )}
           </>
         )}
       </div>

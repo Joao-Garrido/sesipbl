@@ -5,10 +5,9 @@
 import { useEffect, useState } from "react";
 import * as store from "@/lib/localStore";
 import { buildPhases, fmtMeters } from "@/lib/phases";
+import { exitAnglePeak, exitVelocityMean, repeatabilityScore } from "@/lib/analysis";
 import type {
   AthleteBio,
-  AIInsight,
-  AthleteRanking,
   PRRecord,
   SessionSummary,
 } from "@/lib/mock";
@@ -35,8 +34,6 @@ export interface AthleteStats {
   attemptSeries: AttemptPoint[]; // uma entrada por tentativa (cronológico)
   prs: PRRecord[];
   phaseScores: PhaseScore[];
-  insights: AIInsight[];
-  leaderboard: AthleteRanking[];
   bio: AthleteBio;
   sessionsToday: number;
   todayAttempts: Attempt[];
@@ -63,15 +60,30 @@ function avg(arr: number[]): number {
 function summarize(s: Session): SessionSummary {
   const a = s.attempts;
   const t100 = a.map((x) => x.metrics.t100m).filter((t): t is number => !!t && t > 0);
-  const cons = a.map((x) => x.metrics.consistency).filter((c): c is number => c != null);
+  // Consistência = REPETIBILIDADE: o quanto os picos de velocidade das tentativas
+  // se parecem entre si (CV). 1 tentativa (ou nenhuma medida) → 100% (baseline).
+  const peakVels = a.map((x) => x.metrics.peakVelocity).filter((v) => v > 0);
+  // Ângulo de saída via findPeaks (maior pico da curva de ângulo corporal).
+  // Usa a melhor tentativa (maior pico de vel) que tenha curva.
+  const withCurve = a.filter((x) => x.velocityCurve?.length > 3);
+  const bestForAngle = withCurve.length
+    ? withCurve.reduce((best, x) => (x.metrics.peakVelocity > best.metrics.peakVelocity ? x : best))
+    : null;
+  const exitAngle = bestForAngle ? exitAnglePeak(bestForAngle.velocityCurve) : 0;
+  // Velocidade de saída: média dos primeiros 200 pontos da melhor tentativa.
+  const exitVelocity = bestForAngle ? exitVelocityMean(bestForAngle.velocityCurve) : 0;
+  // Ângulo de saída coletado: valor único do findPeaks do firmware (metrics.startAngle).
+  const collectedAngle = bestForAngle?.metrics.startAngle ?? 0;
   return {
     id: s.id,
     date: s.data,
     label: labelOf(s.data),
     peakVelocity: max(a.map((x) => x.metrics.peakVelocity)),
-    avgAngle: avg(a.map((x) => x.metrics.startAngle).filter((v) => v > 0)),
-    bestT100m: t100.length ? min(t100) : null, // null = ninguém completou 100m
-    consistency: Math.round(avg(cons)),
+    exitVelocity: +exitVelocity.toFixed(2),
+    exitAngle,
+    collectedAngle: +collectedAngle.toFixed(1),
+    bestT100m: t100.length ? min(t100) : null,
+    consistency: repeatabilityScore(peakVels) ?? 100,
     attemptsCount: a.length,
   };
 }
@@ -138,58 +150,6 @@ function buildPRs(attempts: Attempt[], athleteId: string, refAngle: number): PRR
   return prs;
 }
 
-function buildInsights(history: SessionSummary[], attempts: Attempt[]): AIInsight[] {
-  if (!attempts.length) return [];
-  const out: AIInsight[] = [];
-  const bestVel = max(attempts.map((a) => a.metrics.peakVelocity));
-  out.push({
-    id: "ins-vel",
-    severity: "positive",
-    title: "Velocidade de pico",
-    body: `Melhor velocidade registrada: ${bestVel.toFixed(2)} m/s em ${attempts.length} tentativa(s).`,
-    metric: `${bestVel.toFixed(2)} m/s`,
-  });
-  if (history.length >= 2) {
-    const last = history[history.length - 1];
-    const prev = history[history.length - 2];
-    const delta = prev.peakVelocity > 0 ? ((last.peakVelocity - prev.peakVelocity) / prev.peakVelocity) * 100 : 0;
-    out.push({
-      id: "ins-trend",
-      severity: delta >= 0 ? "positive" : "warning",
-      title: delta >= 0 ? "Evolução positiva" : "Queda na velocidade",
-      body: `Velocidade ${delta >= 0 ? "subiu" : "caiu"} ${Math.abs(delta).toFixed(0)}% vs a sessão anterior.`,
-    });
-  }
-  return out;
-}
-
-function buildLeaderboard(): AthleteRanking[] {
-  const sessPeak = (s: Session) => max(s.attempts.map((a) => a.metrics.peakVelocity));
-  return store
-    .getAthletes()
-    .map((ath) => {
-      const atts = store.getAttemptsByAthlete(ath.id);
-      const t100 = atts.map((a) => a.metrics.t100m).filter((t): t is number => !!t && t > 0);
-      const sessions = store.getSessionsByAthlete(ath.id); // mais novo → mais antigo
-      // Tendência real: variação % da vel. de pico entre as 2 últimas sessões.
-      const trend =
-        sessions.length >= 2 && sessPeak(sessions[1]) > 0
-          ? ((sessPeak(sessions[0]) - sessPeak(sessions[1])) / sessPeak(sessions[1])) * 100
-          : 0;
-      return {
-        athleteId: ath.id,
-        nome: ath.nome,
-        categoria: ath.categoria,
-        bestVel: max(atts.map((a) => a.metrics.peakVelocity)),
-        bestT100m: t100.length ? min(t100) : 0,
-        trend,
-        lastSession: sessions[0] ? labelOf(sessions[0].data) : "—",
-      };
-    })
-    .filter((r) => r.bestVel > 0) // só atletas com dados reais entram no ranking
-    .sort((a, b) => b.bestVel - a.bestVel);
-}
-
 function compute(athleteId: string): AthleteStats {
   const sessions = store.getSessionsByAthlete(athleteId); // newest-first
   const attempts = store.getAttemptsByAthlete(athleteId);
@@ -198,11 +158,14 @@ function compute(athleteId: string): AthleteStats {
 
   const history = sessions.map(summarize).reverse(); // cronológico p/ gráficos
   // Série por tentativa (cronológica): cada corrida vira 1 ponto no gráfico.
+  // Consistência por tentativa = repetibilidade ACUMULADA: o quanto os picos de
+  // velocidade até aquela tentativa (inclusive) se parecem entre si.
+  const peakSeq = attempts.map((a) => a.metrics.peakVelocity);
   const attemptSeries: AttemptPoint[] = attempts.map((a, idx) => ({
     label: String(idx + 1),
     peakVelocity: a.metrics.peakVelocity,
     bestT100m: a.metrics.tFinal ?? a.metrics.t100m ?? null,
-    consistency: a.metrics.consistency ?? 0,
+    consistency: repeatabilityScore(peakSeq.slice(0, idx + 1)) ?? 100,
   }));
   const angles = attempts.map((a) => a.metrics.startAngle).filter((v) => v > 0);
   // "PR de saída" = ângulo de largada mais próximo da referência do atleta.
@@ -234,8 +197,6 @@ function compute(athleteId: string): AthleteStats {
     attemptSeries,
     prs: buildPRs(attempts, athleteId, refAngle),
     phaseScores: phaseScoresFrom(attempts),
-    insights: buildInsights(history, attempts),
-    leaderboard: buildLeaderboard(),
     bio,
     sessionsToday: sessions.filter((s) => s.data === todayISO()).length,
     todayAttempts,

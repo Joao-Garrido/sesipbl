@@ -27,7 +27,6 @@ export interface AttemptMetrics {
   t30m?: number;
   t100m?: number;
   tFinal?: number; // tempo até a distância-alvo da prova (10/20/100/custom)
-  consistency?: number; // 0-100 vs PR
 }
 
 export interface Attempt {

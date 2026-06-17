@@ -43,13 +43,14 @@ LOG_DIR      = Path(os.environ.get("LOG_DIR", "logs"))
 DATA_DIR     = Path(os.environ.get("DATA_DIR", "data"))  # historico persistente (atletas + tentativas)
 SIMULATE     = os.environ.get("SIMULATE", "0") == "1"
 
-COLS = [
-    "ts_device",
-    "l_ax", "l_ay", "l_az", "l_gx", "l_gy", "l_gz",
-    "r_ax", "r_ay", "r_az", "r_gx", "r_gy", "r_gz",
-    "pulsos", "vel",
-]
-INT_COLS = {"ts_device", "pulsos"}
+# Formato da ESP (firmware hardware_final.ino):
+#   time          -> millis() em ms
+#   Ax            -> aceleracao eixo X em g (IMU unica)
+#   Angulo_graus  -> angulo ja calculado no firmware (asin(ax)*180/PI)
+#   Pulsos        -> contagem acumulada do encoder
+#   Vel_ms        -> velocidade em m/s ja calculada no firmware
+COLS = ["time", "Ax", "Angulo_graus", "Pulsos", "Vel_ms"]
+INT_COLS = {"time", "Pulsos"}
 
 # ----------------------------------------------------------------
 # Estado
@@ -112,7 +113,8 @@ def serial_loop(loop: asyncio.AbstractEventLoop) -> None:
                 if not raw:
                     continue
                 linha = raw.decode(errors="ignore").strip()
-                if not linha or linha.startswith("Time"):
+                # pula cabecalho do firmware: "time,Ax,Angulo_graus,Pulsos,Vel_ms"
+                if not linha or linha.lower().startswith("time"):
                     continue
                 row = parse(linha)
                 if row is None:
@@ -121,12 +123,12 @@ def serial_loop(loop: asyncio.AbstractEventLoop) -> None:
                     # so ve "sem dados" e nao sabe que e cabo/baud/firmware.
                     if total_drop % 100 == 0:
                         print(f"[serial] {total_drop} linhas descartadas "
-                              f"(verifique cabo/baud/firmware 15 colunas)")
+                              f"(verifique cabo/baud/firmware 5 colunas)")
                     # Muitos descartes e NENHUMA linha valida = assinatura classica de
-                    # firmware/contagem de colunas errados (ex: sketch de 9 colunas).
+                    # firmware/contagem de colunas errados.
                     if total_recv == 0 and total_drop in (50, 200, 500):
                         print(f"[serial] ATENCAO: {total_drop} linhas recebidas e NENHUMA valida. "
-                              f"Provavel firmware/baud errado — esperado 15 colunas "
+                              f"Provavel firmware/baud errado — esperado 5 colunas "
                               f"({','.join(COLS)}).")
                     continue
 
@@ -164,22 +166,19 @@ def simulator_loop(loop: asyncio.AbstractEventLoop) -> None:
     csv_f, csv_w = abrir_csv()
     serial_ok = True
     print("[SIMULADOR] ativo (SIMULATE=1). Frequencia: 100 Hz")
-    print("[SIMULADOR] Gerando dados sinteticos no formato exato da ESP")
+    print("[SIMULADOR] Gerando dados sinteticos no formato exato da ESP (5 colunas)")
 
-    # parametros do encoder (iguais ao sketch)
+    # parametros do encoder (iguais ao firmware hardware_final.ino)
     PPR_X4 = 2400
-    DIAMETRO_M = 0.05
+    DIAMETRO_M = 0.068
     PERIM = math.pi * DIAMETRO_M
 
     t0 = time.monotonic()
-    last_loop = t0
     pulsos_acum = 0.0
 
     while True:
         agora = time.monotonic()
         elapsed = agora - t0
-        dt = agora - last_loop
-        last_loop = agora
 
         # Velocidade simulada: perfil de 100m
         #   0-2s: rampa 0->8 m/s (saida + aceleracao)
@@ -196,42 +195,29 @@ def simulator_loop(loop: asyncio.AbstractEventLoop) -> None:
         else:
             t0 = agora  # reseta ciclo
             pulsos_acum = 0.0
+            elapsed = 0.0
             vel = 0.0
 
-        # Encoder integra velocidade
-        pulsos_acum += (vel / PERIM) * PPR_X4 * dt
+        # Encoder acumula com a velocidade (dt fixo de 10 ms = 100 Hz)
+        pulsos_acum += (vel / PERIM) * PPR_X4 * 0.01
         pulsos = int(pulsos_acum)
 
-        # IMU local (carretilha): gravidade + bounce do passo + ruido
-        # Aceleracao em "g" (igual sketch que divide por 4096 com FS=8g)
-        # Bounce proporcional a velocidade — quanto mais rapido, mais bate.
-        # Cadencia ~3 Hz (passos por segundo) em regime.
-        stride_hz = 2.5 + vel * 0.15
-        bounce_amp = 0.25 + vel * 0.05
-        l_az = 1.0 + bounce_amp * math.sin(elapsed * stride_hz * 2 * math.pi) + random.uniform(-0.03, 0.03)
-        l_ax = 0.20 * math.sin(elapsed * 5) + random.uniform(-0.04, 0.04)
-        l_ay = 0.15 * math.cos(elapsed * 5) + random.uniform(-0.04, 0.04)
-        # Gyro em °/s (sketch divide por 131)
-        l_gx = 8.0 * math.sin(elapsed * 3) + random.uniform(-0.5, 0.5)
-        l_gy = 5.0 * math.cos(elapsed * 4) + random.uniform(-0.5, 0.5)
-        l_gz = 3.0 * math.sin(elapsed * 2) + random.uniform(-0.5, 0.5)
+        # Ax em "g": atleta inclina (lean) na saida e vai endireitando.
+        # O fio puxa para a esquerda -> Ax negativo (0 a -1g), igual ao firmware.
+        # Maior inclinacao no inicio da corrida; diminui conforme acelera.
+        lean = -0.55 * math.exp(-elapsed * 0.8)  # -0.55g -> 0
+        ax = lean + random.uniform(-0.02, 0.02)
 
-        # IMU remoto (atleta) com pequeno offset (simula ESP-NOW)
-        r_ax = l_ax * 0.7 + random.uniform(-0.05, 0.05)
-        r_ay = l_ay * 0.7 + random.uniform(-0.05, 0.05)
-        r_az = l_az + random.uniform(-0.03, 0.03)
-        r_gx = l_gx * 0.6 + random.uniform(-0.5, 0.5)
-        r_gy = l_gy * 0.6 + random.uniform(-0.5, 0.5)
-        r_gz = l_gz * 0.6 + random.uniform(-0.5, 0.5)
+        # Angulo: identico ao calcularAngulo() do firmware
+        ax_clamped = max(-1.0, min(0.0, ax))
+        angulo = math.degrees(math.asin(ax_clamped))
 
         row = {
-            "ts_device": int(elapsed * 1000),
-            "l_ax": round(l_ax, 4), "l_ay": round(l_ay, 4), "l_az": round(l_az, 4),
-            "l_gx": round(l_gx, 4), "l_gy": round(l_gy, 4), "l_gz": round(l_gz, 4),
-            "r_ax": round(r_ax, 4), "r_ay": round(r_ay, 4), "r_az": round(r_az, 4),
-            "r_gx": round(r_gx, 4), "r_gy": round(r_gy, 4), "r_gz": round(r_gz, 4),
-            "pulsos": pulsos,
-            "vel": round(vel, 3),
+            "time": int(elapsed * 1000),
+            "Ax": round(ax, 4),
+            "Angulo_graus": round(angulo, 2),
+            "Pulsos": pulsos,
+            "Vel_ms": round(vel, 3),
             "ts_recv": int(time.time() * 1000),
         }
 

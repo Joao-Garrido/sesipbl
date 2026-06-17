@@ -52,7 +52,9 @@ export interface SessionSummary {
   date: string;
   label: string;
   peakVelocity: number;
-  avgAngle: number;
+  exitVelocity: number; // velocidade média dos primeiros 200 pontos (saída)
+  exitAngle: number;
+  collectedAngle: number; // ângulo de saída coletado (findPeaks do firmware)
   bestT100m: number | null; // null = nenhuma tentativa completou 100m nesta sessão
   consistency: number;
   attemptsCount: number;
