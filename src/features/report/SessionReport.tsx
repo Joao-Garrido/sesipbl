@@ -5,7 +5,7 @@ import { useAthletes } from "@/hooks/useAthletes";
 import { useAttempts } from "@/hooks/useAttempts";
 import { useSessions } from "@/hooks/useSessions";
 import * as store from "@/lib/localStore";
-import { attemptsToCsv, exitPhaseToCsv, downloadCsv } from "@/lib/exportCsv";
+import { attemptsToCsv, exitPhaseToCsv, espRawToCsv, downloadCsv } from "@/lib/exportCsv";
 import {
   bodyAngleCurve,
   exitPeakVelocity,
@@ -175,6 +175,21 @@ export function SessionReport() {
     downloadCsv(`saida_10pct_${nome}_T${featured.numero}_${stamp}.csv`, exitPhaseToCsv(featured, infoOf));
   }
 
+  // CSV BRUTO literal da ESP de UMA tentativa (time,Ax,Angulo_graus,Pulsos,Vel_ms),
+  // baixado separadamente — um arquivo por tentativa.
+  function downloadAttemptRaw(a: Attempt) {
+    if (!a.rawSamples?.length) {
+      alert(
+        "Esta tentativa não tem dados brutos da ESP.\n\n" +
+        "O stream cru passou a ser gravado nesta versão — tentativas antigas não o têm."
+      );
+      return;
+    }
+    const nome = (athlete?.nome ?? "atleta").replace(/\s+/g, "_");
+    const stamp = new Date(a.startedAt).toISOString().slice(0, 10);
+    downloadCsv(`bruto_${nome}_T${a.numero}_${stamp}.csv`, espRawToCsv(a), false);
+  }
+
   return (
     <>
       <Header
@@ -308,7 +323,7 @@ export function SessionReport() {
 
             {/* Tabela de métricas (todas as tentativas da sessão) */}
             <Card title="Métricas por Tentativa">
-              <AttemptsTable attempts={attempts} />
+              <AttemptsTable attempts={attempts} onDownloadRaw={downloadAttemptRaw} />
             </Card>
 
             {/* Perfil por fase + ângulos */}

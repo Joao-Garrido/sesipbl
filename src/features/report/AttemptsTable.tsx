@@ -2,12 +2,15 @@
 import type { Attempt } from "@/lib/types";
 import { exitPeakVelocity } from "@/lib/analysis";
 import { Badge, perfLevel } from "@/shared/components/Badge";
+import { HiOutlineTableCells } from "react-icons/hi2";
 
 interface Props {
   attempts: Attempt[];
+  // Baixa o CSV bruto (literal da ESP) de UMA tentativa. Se ausente, a coluna não aparece.
+  onDownloadRaw?: (a: Attempt) => void;
 }
 
-export function AttemptsTable({ attempts }: Props) {
+export function AttemptsTable({ attempts, onDownloadRaw }: Props) {
   const best = attempts.length ? Math.max(...attempts.map((a) => a.metrics.peakVelocity)) : 0;
 
   return (
@@ -25,6 +28,7 @@ export function AttemptsTable({ attempts }: Props) {
             <th className="py-2 px-3">Tempo</th>
             <th className="py-2 px-3">Consist.</th>
             <th className="py-2 px-3">Status</th>
+            {onDownloadRaw && <th className="py-2 px-3">Bruto</th>}
           </tr>
         </thead>
         <tbody>
@@ -55,6 +59,18 @@ export function AttemptsTable({ attempts }: Props) {
                     {a.status}
                   </Badge>
                 </td>
+                {onDownloadRaw && (
+                  <td className="py-2.5 px-3">
+                    <button
+                      onClick={() => onDownloadRaw(a)}
+                      disabled={!a.rawSamples?.length}
+                      title={a.rawSamples?.length ? "Baixar dados brutos da ESP desta tentativa (CSV)" : "Esta tentativa não tem dados brutos"}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-semibold border border-border hover:bg-track-50 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <HiOutlineTableCells className="w-3.5 h-3.5" /> Bruto
+                    </button>
+                  </td>
+                )}
               </tr>
             );
           })}

@@ -28,7 +28,7 @@ const items = [
   { href: "/live", label: "Análise ao Vivo", icon: HiOutlineSignal, live: true },
   { href: "/relatorio", label: "Relatórios", icon: HiOutlineChartBar },
   { href: "/atletas", label: "Atletas", icon: HiOutlineUsers },
-  { href: "/sessoes", label: "Sessões", icon: HiOutlineClipboardDocumentList },
+  { href: "/sessoes", label: "Tentativas", icon: HiOutlineClipboardDocumentList },
   { href: "/configuracoes", label: "Configurações", icon: HiOutlineCog6Tooth },
 ];
 
