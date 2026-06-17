@@ -1,6 +1,6 @@
 # Análise Cinemática — PBL Grupo 1
 
-Dashboard para treinadores de atletas paralímpicos. Mede velocidade/aceleração instantânea e ângulo na saída de bloco (100m), via encoder + IMU + ESP32 → Firebase.
+Dashboard para treinadores de atletas paralímpicos. Mede velocidade/aceleração instantânea e ângulo na saída de bloco (20m), via encoder + IMU + ESP32 → Firebase.
 
 **Responsável:** João Garrido (REQ-12 + REQ-13)
 
@@ -29,31 +29,3 @@ cp .env.example .env.local
 - `/sessoes` — histórico
 - `/configuracoes` — status hardware + calibração
 
-## Tela ao Vivo (REQ-13)
-
-```
-┌─────────────────┬────────────────┬────────────────────┐
-│   VELOCIDADE    │   ACELERAÇÃO   │   ÂNGULO SAÍDA     │
-│   8.2 m/s  🟢   │   3.1 m/s² 🟡  │     42.3°  🟢      │
-├─────────────────┴────────────────┴────────────────────┤
-│  CURVA DE VELOCIDADE      │   ÂNGULO LARGADA          │
-│  [area chart]             │   [gauge SVG ±5°]         │
-└────────────────────────────────────────────────────────┘
-```
-
-## Firebase data shape
-
-```
-/live/{attemptId}                              ← Realtime DB (latência <200ms)
-  { ts, velocity, acceleration, angle, displacement, elapsed }
-
-/athletes/{id}                                 ← Firestore (queries)
-/athletes/{id}/sessions/{sessionId}
-/athletes/{id}/sessions/{sessionId}/attempts/{n}
-  { metrics: { peakVel, peakAccel, startAngle, t10m, ... },
-    velocityCurve: [{ t, v, a, d }, ...] }
-```
-
-## Reuso do Vinlet
-
-Components, tokens, padrão mock-fallback, layout shell — tudo adaptado de `../clinic-saas/`. Ver `CLAUDE.md` para mapeamento completo.
