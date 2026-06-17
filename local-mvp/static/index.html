@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BEL Monitor — MVP Local</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,Segoe UI,system-ui,sans-serif;background:#0b0e14;color:#e6edf3}
+  .container{max-width:1280px;margin:0 auto;padding:24px}
+  header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;gap:16px;flex-wrap:wrap}
+  h1{margin:0;font-size:22px}
+  .muted{color:#8b949e;font-size:13px}
+  .status{display:flex;gap:16px;align-items:center;font-size:13px}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .dot.on{background:#3fb950;box-shadow:0 0 8px #3fb950}
+  .dot.off{background:#f85149}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:20px}
+  .card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:14px}
+  .card h3{margin:0 0 4px;font-size:11px;text-transform:uppercase;color:#8b949e;letter-spacing:.5px;font-weight:500}
+  .value{font-size:26px;font-weight:700;margin:0}
+  .unit{font-size:13px;color:#8b949e;margin-left:4px;font-weight:400}
+  .chart-card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:14px;margin-bottom:14px}
+  .chart-card h2{margin:0 0 8px;font-size:14px;font-weight:600}
+  .chart-wrap{height:200px;position:relative}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:780px){.row{grid-template-columns:1fr}}
+  button{background:#21262d;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:13px}
+  button:hover{background:#30363d}
+  footer{text-align:center;color:#8b949e;font-size:12px;margin-top:24px}
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div>
+      <h1>BEL Monitor</h1>
+      <p class="muted">Telemetria local — IMU + Encoder</p>
+    </div>
+    <div class="status">
+      <span><span id="dot-ws" class="dot off"></span><span id="status-ws">conectando...</span></span>
+      <span><span id="dot-serial" class="dot off"></span><span id="status-serial">serial</span></span>
+      <span class="muted" id="contador">0 amostras</span>
+      <button onclick="limpar()">Limpar gráficos</button>
+      <button onclick="pausar()" id="btn-pausa">Pausar</button>
+    </div>
+  </header>
+
+  <div class="grid">
+    <div class="card"><h3>Velocidade</h3><p class="value"><span id="kpi-vel">-</span><span class="unit">m/s</span></p></div>
+    <div class="card"><h3>Pulsos Encoder</h3><p class="value"><span id="kpi-pul">-</span></p></div>
+    <div class="card"><h3>|Accel L|</h3><p class="value"><span id="kpi-acl">-</span><span class="unit">g</span></p></div>
+    <div class="card"><h3>|Gyro L|</h3><p class="value"><span id="kpi-gyl">-</span><span class="unit">°/s</span></p></div>
+    <div class="card"><h3>|Accel R|</h3><p class="value"><span id="kpi-acr">-</span><span class="unit">g</span></p></div>
+    <div class="card"><h3>Taxa</h3><p class="value"><span id="kpi-hz">-</span><span class="unit">Hz</span></p></div>
+  </div>
+
+  <div class="row">
+    <div class="chart-card"><h2>Velocidade (m/s)</h2><div class="chart-wrap"><canvas id="c-vel"></canvas></div></div>
+    <div class="chart-card"><h2>Pulsos Encoder</h2><div class="chart-wrap"><canvas id="c-pul"></canvas></div></div>
+  </div>
+  <div class="row">
+    <div class="chart-card"><h2>Acelerômetro L (Carretilha) [g]</h2><div class="chart-wrap"><canvas id="c-acl"></canvas></div></div>
+    <div class="chart-card"><h2>Giroscópio L (Carretilha) [°/s]</h2><div class="chart-wrap"><canvas id="c-gyl"></canvas></div></div>
+  </div>
+  <div class="row">
+    <div class="chart-card"><h2>Acelerômetro R (Atleta) [g]</h2><div class="chart-wrap"><canvas id="c-acr"></canvas></div></div>
+    <div class="chart-card"><h2>Giroscópio R (Atleta) [°/s]</h2><div class="chart-wrap"><canvas id="c-gyr"></canvas></div></div>
+  </div>
+
+  <footer>BEL Monitor MVP · Local · Backup CSV em <code>logs/</code></footer>
+</div>
+
+<script>
+const MAX = 300;
+let pausado = false;
+let amostras = [];
+let ultimoTs = 0;
+let hzAcc = 0, hzN = 0;
+
+const Chart = window.Chart;
+Chart.defaults.color = "#8b949e";
+Chart.defaults.borderColor = "#30363d";
+Chart.defaults.font.size = 11;
+Chart.defaults.animation = false;
+
+function mkChart(id, keys) {
+  return new Chart(document.getElementById(id), {
+    type: "line",
+    data: {
+      labels: [],
+      datasets: keys.map(([k, c]) => ({
+        label: k, data: [], borderColor: c, backgroundColor: c,
+        borderWidth: 1.5, pointRadius: 0, tension: 0.2,
+      })),
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: keys.length > 1, labels: { boxWidth: 12 } } },
+      scales: { x: { display: false }, y: { grid: { color: "#21262d" } } },
+    },
+  });
+}
+
+const ch = {
+  vel: mkChart("c-vel", [["vel", "#58a6ff"]]),
+  pul: mkChart("c-pul", [["pulsos", "#a371f7"]]),
+  acl: mkChart("c-acl", [["ax", "#f85149"], ["ay", "#3fb950"], ["az", "#58a6ff"]]),
+  gyl: mkChart("c-gyl", [["gx", "#f85149"], ["gy", "#3fb950"], ["gz", "#58a6ff"]]),
+  acr: mkChart("c-acr", [["ax", "#d29922"], ["ay", "#a371f7"], ["az", "#39d0d8"]]),
+  gyr: mkChart("c-gyr", [["gx", "#d29922"], ["gy", "#a371f7"], ["gz", "#39d0d8"]]),
+};
+
+function aplicaHist(rows) {
+  amostras = rows.slice();
+  redesenha();
+}
+
+function push(row) {
+  if (pausado) return;
+  amostras.push(row);
+  if (amostras.length > MAX) amostras.shift();
+  atualizaKPIs(row);
+  appendChart(row);
+}
+
+function atualizaKPIs(r) {
+  const mag = (a, b, c) => Math.sqrt(a*a + b*b + c*c);
+  document.getElementById("kpi-vel").textContent = r.vel.toFixed(2);
+  document.getElementById("kpi-pul").textContent = r.pulsos;
+  document.getElementById("kpi-acl").textContent = mag(r.l_ax, r.l_ay, r.l_az).toFixed(2);
+  document.getElementById("kpi-gyl").textContent = mag(r.l_gx, r.l_gy, r.l_gz).toFixed(0);
+  document.getElementById("kpi-acr").textContent = mag(r.r_ax, r.r_ay, r.r_az).toFixed(2);
+  document.getElementById("contador").textContent = `${amostras.length} amostras`;
+
+  // taxa amostral (média móvel curta)
+  if (ultimoTs) {
+    const dt = r.ts_recv - ultimoTs;
+    if (dt > 0) {
+      hzAcc += 1000 / dt; hzN++;
+      if (hzN >= 20) {
+        document.getElementById("kpi-hz").textContent = (hzAcc / hzN).toFixed(0);
+        hzAcc = 0; hzN = 0;
+      }
+    }
+  }
+  ultimoTs = r.ts_recv;
+}
+
+function appendChart(r) {
+  function add(c, label, vals) {
+    c.data.labels.push(label);
+    vals.forEach((v, i) => c.data.datasets[i].data.push(v));
+    if (c.data.labels.length > MAX) {
+      c.data.labels.shift();
+      c.data.datasets.forEach(d => d.data.shift());
+    }
+    c.update("none");
+  }
+  add(ch.vel, r.ts_device, [r.vel]);
+  add(ch.pul, r.ts_device, [r.pulsos]);
+  add(ch.acl, r.ts_device, [r.l_ax, r.l_ay, r.l_az]);
+  add(ch.gyl, r.ts_device, [r.l_gx, r.l_gy, r.l_gz]);
+  add(ch.acr, r.ts_device, [r.r_ax, r.r_ay, r.r_az]);
+  add(ch.gyr, r.ts_device, [r.r_gx, r.r_gy, r.r_gz]);
+}
+
+function redesenha() {
+  Object.values(ch).forEach(c => {
+    c.data.labels = []; c.data.datasets.forEach(d => d.data = []);
+  });
+  amostras.forEach(r => appendChart(r));
+  if (amostras.length) atualizaKPIs(amostras[amostras.length - 1]);
+}
+
+function limpar() {
+  amostras = []; redesenha();
+  document.getElementById("contador").textContent = "0 amostras";
+}
+
+function pausar() {
+  pausado = !pausado;
+  document.getElementById("btn-pausa").textContent = pausado ? "Retomar" : "Pausar";
+}
+
+// WebSocket
+let ws, recvTimer;
+function conectar() {
+  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen = () => {
+    document.getElementById("dot-ws").className = "dot on";
+    document.getElementById("status-ws").textContent = "conectado";
+  };
+  ws.onmessage = (ev) => {
+    const m = JSON.parse(ev.data);
+    if (m.type === "init") aplicaHist(m.data);
+    else if (m.type === "data") {
+      push(m.row);
+      document.getElementById("dot-serial").className = "dot on";
+      document.getElementById("status-serial").textContent = "recebendo";
+      clearTimeout(recvTimer);
+      recvTimer = setTimeout(() => {
+        document.getElementById("dot-serial").className = "dot off";
+        document.getElementById("status-serial").textContent = "sem dados";
+      }, 3000);
+    }
+  };
+  ws.onclose = () => {
+    document.getElementById("dot-ws").className = "dot off";
+    document.getElementById("status-ws").textContent = "reconectando...";
+    setTimeout(conectar, 1500);
+  };
+  ws.onerror = () => { try { ws.close(); } catch (_) {} };
+}
+conectar();
+</script>
+</body>
+</html>

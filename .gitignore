@@ -1,0 +1,48 @@
+# ===== Dependências e build =====
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# ===== Python =====
+.venv/
+**/__pycache__/
+*.pyc
+
+# ===== Logs e dados (não vão pro repo) =====
+*.log
+logs/
+*.csv
+local-mvp/data/
+teste.pdf
+
+# ===== Env locais (segredos/config da máquina) =====
+.env
+.env.local
+.env*.local
+
+# ===== SO / ferramentas =====
+.DS_Store
+.claude/
+
+# ===== Pacotes de revisão (gerados — ficam só na sua máquina) =====
+*.zip
+REVISAO_GRUPO/
+_revisao/
+
+# ===== Código antigo / duplicado (mantido local, fora do repo) =====
+bridge/
+Relatorio_parte_Joao.md
+BEL_Tutorial_Grupo.pdf
+PBL7_Carretilha/angulo_imus.py
+PBL7_Carretilha/analise_completa.py
+PBL7_Carretilha/encoder_esp.cpp
+PBL7_Carretilha/leitura_imus.cpp
+PBL7_Carretilha/plot_encoder.py
+PBL7_Carretilha/ESP_Carretilha/
+PBL7_Carretilha/ESP_Atleta/
+local-mvp/run_plot.py
+local-mvp/ver_encoder.py
+local-mvp/RUN_PLOT.bat
+local-mvp/ver_encoder.bat

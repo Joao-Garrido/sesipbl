@@ -1,0 +1,11 @@
+pyserial>=3.5
+fastapi>=0.110
+uvicorn[standard]>=0.27
+python-dotenv>=1.0
+# Para run_angulo.py e run_plot.py (clientes WebSocket dos scripts do PBL7_Carretilha)
+websocket-client>=1.7
+matplotlib>=3.7
+numpy>=1.24
+# pandas/scipy NAO ficam aqui: nenhum arquivo de runtime (server.py/run_angulo.py/
+# run_plot.py) os importa. Eles so servem para a analise offline.
+# Se for rodar PBL7_Carretilha/analise_completa.py, instale: requirements-analysis.txt

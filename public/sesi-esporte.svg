@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 220" width="200" height="220">
+  <!-- Wolf head silhouette — SESI Esporte mark -->
+  <defs>
+    <linearGradient id="wolf" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F8F8F8" />
+      <stop offset="1" stop-color="#D8D8D8" />
+    </linearGradient>
+  </defs>
+  <!-- Wolf head -->
+  <path d="M100 18 L60 38 L48 70 L52 110 L78 130 L78 145 L100 158 L122 145 L122 130 L148 110 L152 70 L140 38 Z"
+        fill="url(#wolf)" stroke="#3A1A1A" stroke-width="2" stroke-linejoin="round" />
+  <!-- Eyes (red) -->
+  <path d="M75 78 L92 88 L88 96 Z" fill="#0A0A0A" />
+  <path d="M125 78 L108 88 L112 96 Z" fill="#0A0A0A" />
+  <!-- Nose / muzzle -->
+  <path d="M95 110 L100 122 L105 110 Z" fill="#0A0A0A" />
+  <!-- Banner ribbon: ESPORTE -->
+  <path d="M28 162 L172 162 L168 198 L150 192 L140 198 L60 198 L50 192 L32 198 Z"
+        fill="#3A1A1A" stroke="#1A0A0A" stroke-width="1.5" stroke-linejoin="round" />
+  <text x="100" y="186" text-anchor="middle" font-family="Arial Black, sans-serif" font-size="22" font-weight="900" fill="white" letter-spacing="1">ESPORTE</text>
+  <!-- SESI red bar at bottom -->
+  <rect x="62" y="194" width="76" height="14" fill="#B91C2C" rx="2" />
+  <text x="100" y="205" text-anchor="middle" font-family="Arial Black, sans-serif" font-size="10" font-weight="900" fill="white" letter-spacing="3">SESI</text>
+</svg>

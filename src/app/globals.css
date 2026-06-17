@@ -1,0 +1,69 @@
+@import "tailwindcss";
+
+@theme {
+  /* Base */
+  --color-bg: #F5F5F3;
+  --color-text: #1A1A1A;
+  --color-text-muted: #6B7280;
+  --color-border: #E5E7EB;
+
+  /* Track palette (legacy compat — apontam para SESI vermelho) */
+  --color-primary: #B91C2C;
+  --color-track-50: #FAF1F2;
+  --color-track-100: #EFC9CD;
+  --color-track-500: #D04F5C;
+  --color-track-600: #8C1521;
+  --color-track-700: #0A0A0A;
+
+  /* SESI brand — vermelho + preto */
+  --color-sesi-red-50: #FAF1F2;
+  --color-sesi-red-100: #EFC9CD;
+  --color-sesi-red-300: #D04F5C;
+  --color-sesi-red-500: #B91C2C;
+  --color-sesi-red-600: #8C1521;
+  --color-sesi-red-700: #6B1019;
+  --color-sesi-black: #0A0A0A;
+  --color-sesi-charcoal: #1A1A1A;
+  --color-sesi-graphite: #2A2A2A;
+
+  /* Gold = AI insights / CTA secundário */
+  --color-gold-400: #C5A059;
+  --color-gold-500: #B08A3E;
+  --color-gold-600: #8C6E2F;
+
+  /* Performance semáforo */
+  --color-perf-optimal: #10B981;
+  --color-perf-good: #06B6D4;
+  --color-perf-warning: #F59E0B;
+  --color-perf-critical: #EF4444;
+
+  /* Race phases */
+  --color-phase-block: #B91C2C;
+  --color-phase-accel: #8C1521;
+  --color-phase-maxv: #6B1019;
+  --color-phase-maint: #1A1A1A;
+}
+
+html, body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Live blink */
+@keyframes pulse-live {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.live-dot { animation: pulse-live 1.4s ease-in-out infinite; }
+
+/* Digital chronometer */
+.font-mono-num { font-family: "SF Mono", "Menlo", "Consolas", "Liberation Mono", monospace; font-variant-numeric: tabular-nums; }
+
+/* Raw stream ticker scroll */
+@keyframes streamFade {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.stream-row { animation: streamFade 0.18s ease-out; }
