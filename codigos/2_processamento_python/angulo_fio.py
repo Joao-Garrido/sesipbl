@@ -5,7 +5,7 @@ import time
 import sys
 from scipy.signal import butter, filtfilt, find_peaks
 
-CSV_PATH         = 'dados_coleta.csv'
+CSV_PATH         = 'bruto_Emily_2026-06-17'
 COLUNAS          = ['time', 'Ax', 'Angulo_graus', 'Pulsos', 'Vel_ms']
 PORTA_SERIAL     = 'COM4'
 BAUD_RATE        = 115200

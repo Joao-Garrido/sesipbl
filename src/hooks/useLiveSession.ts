@@ -1,7 +1,7 @@
 "use client";
 // Hook mock — gera corrida sintética; emite dados processados + raw layer
 import { useEffect, useRef, useState } from "react";
-import type { LiveFrame, VelocityPoint, HardwareStatus } from "@/lib/types";
+import type { LiveFrame, VelocityPoint, HardwareStatus, EspRawSample } from "@/lib/types";
 
 interface LiveState {
   isLive: boolean;
@@ -10,6 +10,8 @@ interface LiveState {
   rawHistory: LiveFrame[];
   hardware: HardwareStatus;
   calibrating: boolean;
+  // Modo demo/mock: não há ESP real, então não há stream cru para exportar.
+  getRawSamples: () => EspRawSample[];
 }
 
 const ENCODER_WHEEL_PERIM_M = 0.5;
@@ -122,5 +124,5 @@ export function useLiveSession(attemptId: string | null): LiveState {
     }
   }, [attemptId]);
 
-  return { isLive, current, curve, rawHistory, hardware, calibrating: false };
+  return { isLive, current, curve, rawHistory, hardware, calibrating: false, getRawSamples: () => [] };
 }

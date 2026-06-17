@@ -70,8 +70,11 @@ function summarize(s: Session): SessionSummary {
     ? withCurve.reduce((best, x) => (x.metrics.peakVelocity > best.metrics.peakVelocity ? x : best))
     : null;
   const exitAngle = bestForAngle ? exitAnglePeak(bestForAngle.velocityCurve) : 0;
-  // Velocidade de saída: média dos primeiros 200 pontos da melhor tentativa.
-  const exitVelocity = bestForAngle ? exitVelocityMean(bestForAngle.velocityCurve) : 0;
+  // Velocidade de saída = valor exato do ajuste_plot_vel.py salvo na tentativa
+  // (metrics.exitMeanVelocity). Dados antigos sem a métrica: estimativa pela curva.
+  const exitVelocity = bestForAngle
+    ? bestForAngle.metrics.exitMeanVelocity ?? exitVelocityMean(bestForAngle.velocityCurve)
+    : 0;
   // Ângulo de saída coletado: valor único do findPeaks do firmware (metrics.startAngle).
   const collectedAngle = bestForAngle?.metrics.startAngle ?? 0;
   return {

@@ -8,7 +8,7 @@
 
 import { useLiveSession } from "./useLiveSession";
 import { useLocalLiveSession } from "./useLocalLiveSession";
-import type { LiveFrame, VelocityPoint, HardwareStatus } from "@/lib/types";
+import type { LiveFrame, VelocityPoint, HardwareStatus, EspRawSample } from "@/lib/types";
 
 export interface AutoLiveState {
   isLive: boolean;
@@ -17,6 +17,7 @@ export interface AutoLiveState {
   rawHistory: LiveFrame[];
   hardware: HardwareStatus;
   calibrating: boolean;
+  getRawSamples: () => EspRawSample[];
 }
 
 const LOCAL_WS_URL: string | undefined = process.env.NEXT_PUBLIC_LOCAL_WS_URL;

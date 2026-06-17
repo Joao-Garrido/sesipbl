@@ -5,7 +5,7 @@ import { Header } from "@/shared/components/Header";
 import { Badge } from "@/shared/components/Badge";
 import { useSessions } from "@/hooks/useSessions";
 import { useAthletes } from "@/hooks/useAthletes";
-import { rawCurveToCsv, attemptsToCsv, downloadCsv } from "@/lib/exportCsv";
+import { espRawToCsv, ESP_RAW_HEADER, attemptsToCsv, downloadCsv } from "@/lib/exportCsv";
 import * as store from "@/lib/localStore";
 import Link from "next/link";
 import { HiOutlineTableCells, HiOutlineDocumentArrowDown } from "react-icons/hi2";
@@ -24,11 +24,23 @@ export default function SessoesPage() {
   function downloadRawCsv(sessionId: string, athleteId: string) {
     const attempts = store.getAttemptsBySession(sessionId);
     if (!attempts.length) return;
+    // Só tentativas que têm o stream cru capturado (a partir desta versão da plataforma).
+    const comBruto = attempts.filter((a) => a.rawSamples && a.rawSamples.length);
+    if (!comBruto.length) {
+      alert(
+        "Esta sessão não tem dados brutos da ESP.\n\n" +
+        "O stream cru (time,Ax,Angulo_graus,Pulsos,Vel_ms) passou a ser gravado nesta " +
+        "versão — tentativas antigas não o têm. Faça uma nova captura ao vivo para gerá-lo."
+      );
+      return;
+    }
     const nome = (nameOf(athleteId)).replace(/\s+/g, "_");
     const stamp = new Date().toISOString().slice(0, 10);
-    // Um CSV por tentativa concatenado (header repetido por tentativa para clareza)
-    const csvParts = attempts.map((a) => rawCurveToCsv(a, infoOf));
-    downloadCsv(`bruto_${nome}_${stamp}.csv`, csvParts.join("\r\n"));
+    // CSV LITERAL da ESP: um único cabeçalho + as linhas cruas de todas as tentativas
+    // da sessão, na ordem cronológica (cada tentativa reinicia o `time`). Para uma
+    // sessão de 1 tentativa, o arquivo é exatamente uma coleta limpa da ESP.
+    const body = comBruto.map((a) => espRawToCsv(a, false)).filter(Boolean).join("\n");
+    downloadCsv(`bruto_${nome}_${stamp}.csv`, `${ESP_RAW_HEADER}\n${body}`, false);
   }
 
   function downloadReportCsv(sessionId: string, athleteId: string) {
@@ -85,7 +97,7 @@ export default function SessoesPage() {
                       <button
                         onClick={() => downloadRawCsv(s.id, s.athleteId)}
                         className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold border border-border hover:bg-track-50 transition"
-                        title="Baixar dados brutos do encoder (CSV)"
+                        title="Baixar dados BRUTOS da ESP, exatamente como recebidos (time,Ax,Angulo_graus,Pulsos,Vel_ms)"
                       >
                         <HiOutlineTableCells className="w-3.5 h-3.5" /> Bruto
                       </button>

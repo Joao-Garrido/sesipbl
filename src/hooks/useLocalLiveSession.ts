@@ -23,6 +23,7 @@ import type {
   LiveFrame,
   VelocityPoint,
   HardwareStatus,
+  EspRawSample,
 } from "@/lib/types";
 import { getCalibration } from "@/lib/calibration";
 import { useCalibrationMode } from "@/hooks/useCalibrationMode";
@@ -34,6 +35,9 @@ interface LiveState {
   rawHistory: LiveFrame[];
   hardware: HardwareStatus;
   calibrating: boolean; // mantido por compatibilidade; sempre false (angulo vem pronto)
+  // Retorna o stream CRU da ESP da tentativa atual, à taxa plena, exatamente como
+  // recebido. É um getter (lê um ref) p/ não re-renderizar com o array inteiro.
+  getRawSamples: () => EspRawSample[];
 }
 
 interface RawRow {
@@ -82,6 +86,10 @@ function quaternionDe(pitch: number, roll: number): [number, number, number, num
 // nao perdem amostras. Quando passa de CURVE_MAX, reduz pela metade.
 const CURVE_MAX = 4000;
 const RAW_MAX = 30;
+// Teto de segurança do stream cru salvo por tentativa (~100 Hz). Uma prova normal
+// (auto-stop na distância-alvo) fica MUITO abaixo disso; o cap só evita estourar o
+// localStorage numa captura anormalmente longa (encoder nunca atingiu o alvo).
+const RAW_SAMPLES_MAX = 60000;
 
 export function useLocalLiveSession(
   attemptId: string | null,
@@ -98,6 +106,9 @@ export function useLocalLiveSession(
   // Curva acumulada a TAXA PLENA (toda linha do stream), nao na taxa do throttle.
   // E a fonte para os splits e para a tentativa salva — full-rate, sem perder amostras.
   const curveRef = useRef<VelocityPoint[]>([]);
+  // Stream CRU da ESP da tentativa (toda linha "data" recebida, na ordem de chegada),
+  // exatamente como o server.py enviou — sem reprocessamento. Base do CSV bruto literal.
+  const rawSamplesRef = useRef<EspRawSample[]>([]);
   // Estado HONESTO: nada de mock. Inicia "fail" ate o stream confirmar.
   // RSSI/battery/cpuTemp ficam em 0 porque a ESP nao envia estes campos.
   // A UI deve renderizar "0" como "—" (HardwarePanel faz isso).
@@ -129,6 +140,7 @@ export function useLocalLiveSession(
       setRawHistory([]);
       setIsLive(false);
       curveRef.current = [];
+      rawSamplesRef.current = [];
       return;
     }
 
@@ -142,6 +154,7 @@ export function useLocalLiveSession(
       lastFrameAt: 0,
     };
     curveRef.current = [];
+    rawSamplesRef.current = [];
 
     let ws: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -164,7 +177,19 @@ export function useLocalLiveSession(
         }
 
         if (msg.type === "data" && msg.row) {
-          processRow(msg.row);
+          // Captura a linha CRUA literal (antes de qualquer integração/calibração),
+          // exatamente como o server.py a enviou — é o que vai no CSV bruto.
+          const r = msg.row;
+          if (Number.isFinite(r.time) && rawSamplesRef.current.length < RAW_SAMPLES_MAX) {
+            rawSamplesRef.current.push({
+              time: r.time,
+              Ax: r.Ax,
+              Angulo_graus: r.Angulo_graus,
+              Pulsos: r.Pulsos,
+              Vel_ms: r.Vel_ms,
+            });
+          }
+          processRow(r);
         }
         // 'init' (histórico bufferado do server) é IGNORADO de propósito: é backfill,
         // não dado ao vivo. Processá-lo semearia t0/initialPulsos com uma amostra velha
@@ -307,5 +332,8 @@ export function useLocalLiveSession(
     };
   }, [attemptId, athleteId, wsUrl]);
 
-  return { isLive, current, curve, rawHistory, hardware, calibrating };
+  return {
+    isLive, current, curve, rawHistory, hardware, calibrating,
+    getRawSamples: () => rawSamplesRef.current,
+  };
 }

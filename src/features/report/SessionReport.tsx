@@ -9,8 +9,10 @@ import { attemptsToCsv, exitPhaseToCsv, downloadCsv } from "@/lib/exportCsv";
 import {
   bodyAngleCurve,
   exitPeakVelocity,
+  exitVelocityFromRaw,
   exitPhasePoints,
   exitWindowMeters,
+  N_EXIT_POINTS,
 } from "@/lib/analysis";
 import type { Attempt } from "@/lib/types";
 import { Card } from "@/shared/components/Card";
@@ -125,13 +127,22 @@ export function SessionReport() {
   // Saída do bloco (1ºs 10%) e ângulo do corpo da tentativa em destaque — derivados da
   // curva. Usa exitCurve (alta densidade) quando existe; senão filtra a curva geral.
   const featuredExit = useMemo(() => {
-    if (!featured) return { pts: [], window: 0, peak: 0 };
+    if (!featured) return { pts: [], window: 0, peak: 0, mean: null as number | null };
     const dist = featured.distance ?? 100;
     const pts = featured.exitCurve?.length ? featured.exitCurve : exitPhasePoints(featured.velocityCurve, dist);
+    // Vel. média de saída (1ºs N_EXIT_POINTS pts) — IGUAL ao dashboard. Usa a métrica salva; em dados
+    // antigos sem ela, recalcula do stream CRU (taxa plena) se existir; senão fica indisponível.
+    // NÃO dá pra reconstituir da velocityCurve (reduzida a 300 pts da prova inteira → daria outro valor).
+    const mean =
+      featured.metrics.exitMeanVelocity ??
+      (featured.rawSamples?.length
+        ? +exitVelocityFromRaw(featured.rawSamples).toFixed(2)
+        : null);
     return {
       pts,
       window: exitWindowMeters(dist),
       peak: featured.metrics.exitPeakVelocity ?? exitPeakVelocity(featured.velocityCurve, dist),
+      mean,
     };
   }, [featured]);
   const featuredBodyAngle = useMemo(
@@ -333,6 +344,9 @@ export function SessionReport() {
                 title={`Velocidade na Saída do Bloco${featured ? ` · T${featured.numero}` : ""}`}
                 headerRight={
                   <div className="flex items-center gap-2">
+                    {featuredExit.mean != null && (
+                      <Badge variant="primary" size="sm">média {N_EXIT_POINTS} pts {featuredExit.mean.toFixed(2)} m/s</Badge>
+                    )}
                     {featuredExit.peak > 0 && (
                       <Badge variant="critical" size="sm">pico {featuredExit.peak.toFixed(2)} m/s</Badge>
                     )}
@@ -350,6 +364,9 @@ export function SessionReport() {
                 <ExitVelocityChart points={featuredExit.pts} windowM={featuredExit.window} />
                 <p className="text-[11px] text-text-muted mt-2">
                   Velocidade instantânea nos primeiros 10% da prova ({featuredExit.window.toFixed(1)} m) — a fase de saída do bloco. O CSV traz todos os pontos da fase.
+                  {featuredExit.mean != null && (
+                    <> <span className="font-semibold">Vel. média de saída (1ºs {N_EXIT_POINTS} pts) = {featuredExit.mean.toFixed(2)} m/s</span> — mesmo valor do painel ao vivo (reproduz o ajuste_plot_vel.py).</>
+                  )}
                 </p>
               </Card>
               <Card title={`Ângulo do Corpo durante a corrida${featured ? ` · T${featured.numero}` : ""}`}>

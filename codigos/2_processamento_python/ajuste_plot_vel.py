@@ -11,8 +11,8 @@ PORTA_SERIAL = 'COM4'
 BAUD_RATE   = 115200
 TIMEOUT_DESCONECTADO = 3
 
-JANELA_MEDIA_MOVEL = 3   # pontos
-N_INICIO           = 200 # primeiros N para velocidade de saída
+JANELA_MEDIA_MOVEL = 12   # pontos (estava 3 antes)
+N_INICIO           = 1000 # primeiros N para velocidade de saída
 
 
 # ── COLETA SERIAL ─────────────────────────────────────────────────────────────

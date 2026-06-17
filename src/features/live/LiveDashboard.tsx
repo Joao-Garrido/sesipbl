@@ -1,6 +1,7 @@
 "use client";
 // REQ-13 v2: Tela tempo real completa — raw + processado + hardware + splits + chronometer
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   HiOutlineBolt,
@@ -19,10 +20,11 @@ import { buildPhases, fmtMeters } from "@/lib/phases";
 import {
   bodyAngleCurve,
   exitPeakVelocity,
-  exitVelocityMean,
+  exitVelocityFromRaw,
   exitPhasePoints,
   exitWindowMeters,
-  launchAnglePeak,
+  launchAngleFromRaw,
+  N_EXIT_POINTS,
 } from "@/lib/analysis";
 import type { Attempt, AttemptMetrics, LiveFrame, VelocityPoint } from "@/lib/types";
 import { Card } from "@/shared/components/Card";
@@ -58,19 +60,29 @@ function downsampleCurve(curve: VelocityPoint[], max: number): VelocityPoint[] {
 }
 
 export function LiveDashboard() {
+  const router = useRouter();
   const { athletes } = useAthletes();
   const [athleteId, setAthleteId] = useState<string>("atl-teste");
   const [attemptId, setAttemptId] = useState<string | null>(null);
   const [attemptNum, setAttemptNum] = useState(0);
+  // Resultado do último encerramento — feedback explícito de salvamento + save manual.
+  // "saved": gravada; "trivial": abaixo do mínimo (segura p/ salvar à mão); "empty": sem dados.
+  const [saveResult, setSaveResult] = useState<{
+    status: "saved" | "trivial" | "empty";
+    attempt: Attempt | null;
+    maxD: number;
+    peak: number;
+    points: number;
+  } | null>(null);
   const [distance, setDistance] = useState(100); // distância-alvo da prova (m)
   const startedAtRef = useRef<number>(0);
-  // Amostras de Angulo_graus da tentativa → ângulo de largada ÚNICO via find_peaks
-  // (reproduz angulo_fio.py). Valor congela no pico encontrado, não muda ao vivo.
-  const angleSamplesRef = useRef<number[]>([]);
+  // Ângulo de largada — calculado do stream CRU da ESP (taxa plena) com o MESMO
+  // algoritmo do angulo_fio.py (passa-baixa Butterworth 5 Hz + find_peaks). Ver
+  // launchAngleFromRaw. Atualiza ao vivo conforme chegam amostras.
   const [launchAngle, setLaunchAngle] = useState(0);
 
   const athlete = athletes.find((a) => a.id === athleteId);
-  const { isLive, current: liveCurrent, curve: liveCurve, rawHistory: liveRaw, hardware, calibrating } = useAutoLiveSession(attemptId, athleteId);
+  const { isLive, current: liveCurrent, curve: liveCurve, rawHistory: liveRaw, hardware, calibrating, getRawSamples } = useAutoLiveSession(attemptId, athleteId);
   const bridge = useBridgeStatus();
 
   // Congela a última tentativa: ao encerrar, o hook zera o stream (attemptId=null).
@@ -137,20 +149,22 @@ export function LiveDashboard() {
   const exitWindow = useMemo(() => exitWindowMeters(distance), [distance]);
   const exitPts = useMemo(() => exitPhasePoints(chartCurve, distance), [chartCurve, distance]);
   const exitPeak = useMemo(() => exitPeakVelocity(curve, distance), [curve, distance]);
-  // Vel. média dos primeiros 200 pontos coletados (reproduz ajuste_plot_vel.py: N_INICIO=200)
-  const exitMean = useMemo(() => exitVelocityMean(curve), [curve]);
+  // Vel. de saída EXATA do ajuste_plot_vel.py: média dos 1ºs N_EXIT_POINTS valores de
+  // Vel_ms CRUS da ESP (rawSamples, sem calibração). Recalcula conforme o stream cresce.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const exitMean = useMemo(() => exitVelocityFromRaw(getRawSamples()), [curve]);
 
   // Curva do ângulo do corpo (modelo de inclinação por aceleração — ver lib/analysis).
   const bodyAngle = useMemo(() => bodyAngleCurve(chartCurve), [chartCurve]);
   const currentBodyAngle = bodyAngle.length ? bodyAngle[bodyAngle.length - 1].angle : 90;
 
-  // Ângulo de largada = valor ÚNICO obtido por find_peaks sobre o sinal de
-  // Angulo_graus da tentativa (pico de maior amplitude — ver angulo_fio.py).
-  // Acumula as amostras e recalcula o pico; o valor congela quando achado.
+  // Ângulo de largada: recalcula do stream CRU completo da ESP (taxa plena) a cada
+  // novo frame, com o mesmo filtro do angulo_fio.py — assim o valor exibido BATE com
+  // o que o script Python dá no CSV bruto (não pega espiga de ruído do sinal cru).
   useEffect(() => {
-    if (!attemptId || !current || !Number.isFinite(current.angle)) return;
-    angleSamplesRef.current.push(current.angle);
-    setLaunchAngle(launchAnglePeak(angleSamplesRef.current));
+    if (!attemptId || !current) return;
+    setLaunchAngle(launchAngleFromRaw(getRawSamples()));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current, attemptId]);
 
   // Auto-stop quando atinge a distância-alvo (10/20/100/custom)
@@ -174,38 +188,42 @@ export function LiveDashboard() {
       return; // não inicia visualização se o controle falhou
     }
     startedAtRef.current = Date.now();
-    angleSamplesRef.current = [];
     setLaunchAngle(0);
     setFrozen(null); // descongela: nova tentativa volta ao stream vivo
+    setSaveResult(null); // limpa o aviso de salvamento da tentativa anterior
     setAttemptNum((n) => n + 1);
     setAttemptId(newAttemptId);
   }
 
-  // Monta e salva a tentativa concluída (métricas + curva) no store local.
-  // Idempotente: auto-stop e "Encerrar" podem chamar para o mesmo attemptId.
-  function persistAttempt() {
-    if (IS_DEMO) return; // modo demo: o stream é simulado, não salva como tentativa real
+  // Monta a tentativa concluída (métricas + curva + stream cru) a partir dos dados
+  // AINDA VIVOS. NÃO salva e NÃO aplica o filtro de "trivial" — quem decide salvar é
+  // stopAttempt (auto) ou forceSave (manual). Retorna null só quando não dá pra montar
+  // (demo, sem attemptId, ou amostras de menos). Os limiares vêm junto p/ o feedback.
+  function buildAttempt(): { attempt: Attempt; maxD: number; peak: number; points: number } | null {
+    if (IS_DEMO) return null; // modo demo: o stream é simulado, não salva como tentativa real
     // `curve` vem do hook a TAXA PLENA e cobre o run inteiro (splits sem perda de amostra).
     const full = curve;
-    if (!attemptId || full.length < 5) return;
+    if (!attemptId || full.length < 5) return null;
     const maxDispRaw = full[full.length - 1]?.d ?? current?.displacement ?? 0;
     const peakVelocity = full.reduce((m, p) => (p.v > m ? p.v : m), 0);
-    // ignora tentativas triviais: start/stop acidental ou giro quase parado
-    if (maxDispRaw < 2 || peakVelocity < 0.5) return;
 
     const reachedTarget = maxDispRaw >= distance;
     const sessionId = todaySessionId(athleteId);
     const existing = getAttemptsBySession(sessionId);
     const prior = existing.find((a) => a.id === attemptId);
     const numero = prior ? prior.numero : existing.length + 1;
-    // ângulo de largada: valor ÚNICO via find_peaks (pico de maior amplitude — angulo_fio.py)
-    const startAngle = +launchAngle.toFixed(1);
+    // ângulo de largada calculado do stream CRU completo (taxa plena) com o filtro do
+    // angulo_fio.py — o valor salvo bate com o script Python no CSV bruto.
+    const startAngle = launchAngleFromRaw(getRawSamples());
     const firstTimeAt = (m: number) => full.find((p) => (p.d ?? 0) >= m)?.t;
 
     const metrics: AttemptMetrics = {
       peakVelocity: +peakVelocity.toFixed(2),
       startAngle,
       exitPeakVelocity: +exitPeakVelocity(full, distance).toFixed(2), // pico nos 1ºs 10%
+      // vel. de saída EXATA do ajuste_plot_vel.py: média dos 1ºs N_EXIT_POINTS valores de
+      // Vel_ms CRUS (rawSamples) — é o valor final salvo/mostrado, idêntico ao Python.
+      exitMeanVelocity: +exitVelocityFromRaw(getRawSamples()).toFixed(2),
       t10m: firstTimeAt(10), // undefined se não cruzou 10m (sem 0.00s falso)
       t30m: firstTimeAt(30),
       t100m: firstTimeAt(100),
@@ -225,14 +243,32 @@ export function LiveDashboard() {
       // saída do bloco em alta densidade (≤200 pts só dos 1ºs 10%): a fase mais
       // importante não perde amostras como na velocityCurve (reduzida p/ a prova toda).
       exitCurve: downsampleCurve(exitPhasePoints(full, distance), 200),
+      // Stream CRU da ESP à taxa plena, exatamente como recebido — para o CSV bruto
+      // literal (time,Ax,Angulo_graus,Pulsos,Vel_ms). Cópia: o ref é zerado no stop.
+      rawSamples: getRawSamples().slice(),
       startedAt: startedAtRef.current || Date.now(),
       finishedAt: Date.now(),
     };
-    saveAttempt(attempt);
+    return { attempt, maxD: maxDispRaw, peak: peakVelocity, points: full.length };
   }
 
   async function stopAttempt() {
-    persistAttempt(); // salva ANTES de limpar o stream (setAttemptId(null) zera a curva)
+    // Monta a tentativa ANTES de limpar o stream (setAttemptId(null) zera curva/raw).
+    const built = buildAttempt();
+    if (built) {
+      // Tentativa trivial (giro curto/lento ou start-stop acidental): NÃO salva sozinha,
+      // mas guarda p/ "Salvar mesmo assim". Acima do mínimo: salva automaticamente.
+      const trivial = built.maxD < 2 || built.peak < 0.5;
+      if (trivial) {
+        setSaveResult({ status: "trivial", attempt: built.attempt, maxD: built.maxD, peak: built.peak, points: built.points });
+      } else {
+        saveAttempt(built.attempt);
+        setSaveResult({ status: "saved", attempt: built.attempt, maxD: built.maxD, peak: built.peak, points: built.points });
+      }
+    } else if (!IS_DEMO) {
+      // Não deu pra montar: nenhuma (ou quase nenhuma) amostra chegou da ESP.
+      setSaveResult({ status: "empty", attempt: null, maxD: 0, peak: 0, points: curve.length });
+    }
     // congela os valores vivos para o treinador revisar (sobrevive ao setAttemptId(null))
     setFrozen({ current: liveCurrent, curve: liveCurve, rawHistory: liveRaw });
     setAttemptId(null);
@@ -242,8 +278,21 @@ export function LiveDashboard() {
       console.error("stopAttemptControl falhou:", err);
     }
   }
+
+  // Botão extra "para garantir": (re)grava a tentativa (idempotente por id — inclui
+  // as triviais abaixo do mínimo) e redireciona para o relatório da sessão, que mostra
+  // tudo (comparativo, parciais, fases, ângulo, exports). saveAttempt grava no
+  // localStorage de forma síncrona, então o relatório já lê a tentativa ao abrir.
+  function saveAndOpen() {
+    const a = saveResult?.attempt;
+    if (!a) return;
+    saveAttempt(a);
+    router.push(`/relatorio?athlete=${a.athleteId}&session=${a.sessionId}`);
+  }
+
   function resetAttempt() {
     setFrozen(null); // limpa o snapshot → tela volta ao estado vazio
+    setSaveResult(null);
     setAttemptId(null);
     setAttemptNum(0);
   }
@@ -338,6 +387,11 @@ export function LiveDashboard() {
             </div>
           </motion.div>
         )}
+        {saveResult && !attemptId && (
+          <motion.div variants={itemFade}>
+            <SaveResultBanner result={saveResult} onSaveAndOpen={saveAndOpen} />
+          </motion.div>
+        )}
 
         <motion.div variants={itemFade}>
           <Card>
@@ -387,7 +441,7 @@ export function LiveDashboard() {
           </Card>
           <div className="space-y-3">
             <StatCard
-              label="Vel. média saída (200 pts)"
+              label={`Vel. média saída (${N_EXIT_POINTS} pts)`}
               value={exitMean}
               unit=" m/s"
               reference={athlete?.referenciaVelocidade}
@@ -588,6 +642,68 @@ function PhaseStat({
       <span className="text-[11px] text-text-muted tabular-nums">
         {t != null ? `${t.toFixed(2)}s` : "—"}
       </span>
+    </div>
+  );
+}
+
+function SaveResultBanner({
+  result, onSaveAndOpen,
+}: {
+  result: { status: "saved" | "trivial" | "empty"; maxD: number; peak: number; points: number };
+  onSaveAndOpen: () => void;
+}) {
+  if (result.status === "saved") {
+    return (
+      <div className="rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3">
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 flex-shrink-0" />
+          <div>
+            <p className="text-sm font-bold text-emerald-800">Tentativa salva automaticamente ✓</p>
+            <p className="text-xs text-emerald-700">
+              {result.points} amostras · {result.maxD.toFixed(1)} m · pico {result.peak.toFixed(2)} m/s.
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={onSaveAndOpen}
+          className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition shadow-sm flex-shrink-0"
+        >
+          Salvar e ver na sessão →
+        </button>
+      </div>
+    );
+  }
+  if (result.status === "trivial") {
+    return (
+      <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3">
+          <span className="w-2.5 h-2.5 rounded-full bg-amber-500 flex-shrink-0" />
+          <div>
+            <p className="text-sm font-bold text-amber-900">Tentativa não salva automaticamente</p>
+            <p className="text-xs text-amber-800">
+              Só {result.maxD.toFixed(1)} m e pico {result.peak.toFixed(2)} m/s — abaixo do mínimo (2 m / 0,5 m/s) que evita salvar start-stop acidental. Salve à mão se foi uma corrida válida.
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={onSaveAndOpen}
+          className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-bold bg-sesi-red-500 text-white hover:bg-sesi-red-600 transition shadow-sm shadow-sesi-red-500/30 flex-shrink-0"
+        >
+          Salvar e ver na sessão →
+        </button>
+      </div>
+    );
+  }
+  // empty: nenhuma amostra chegou da ESP
+  return (
+    <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 flex items-center gap-3">
+      <span className="w-2.5 h-2.5 rounded-full bg-red-500 flex-shrink-0" />
+      <div>
+        <p className="text-sm font-bold text-red-800">Nenhum dado recebido da ESP — nada para salvar</p>
+        <p className="text-xs text-red-700">
+          A captura recebeu {result.points} amostra(s). Confira a conexão (painel de hardware e a serial COM5) antes de repetir a tentativa.
+        </p>
+      </div>
     </div>
   );
 }

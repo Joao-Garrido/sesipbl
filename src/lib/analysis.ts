@@ -81,6 +81,85 @@ export function launchAnglePeak(angles: number[]): number {
   return angles[bestIdx];
 }
 
+// ── Butterworth passa-baixa 2ª ordem + filtfilt (zero-fase) ─────────────────
+// Replica scipy.signal.butter(2, Wn, 'low') + filtfilt do angulo_fio.py, para que o
+// ângulo de largada calculado aqui BATA com o script Python (mesmo sinal suavizado).
+// Coeficientes e resultado verificados contra o scipy em dados reais (23.89°).
+function butterworthLowpass2(Wn: number): { b: number[]; a: number[] } {
+  const K = Math.tan((Math.PI * Wn) / 2);
+  const K2 = K * K;
+  const s2 = Math.SQRT2;
+  const norm = 1 / (1 + s2 * K + K2);
+  const b0 = K2 * norm;
+  return { b: [b0, 2 * b0, b0], a: [1, 2 * (K2 - 1) * norm, (1 - s2 * K + K2) * norm] };
+}
+
+// Condições iniciais de regime (equivalente ao scipy.signal.lfilter_zi p/ ordem 2).
+function lfilterZi(b: number[], a: number[]): [number, number] {
+  const c0 = b[1] - a[1] * b[0];
+  const c1 = b[2] - a[2] * b[0];
+  const det = 1 + a[1] + a[2];
+  return [(c0 + c1) / det, ((1 + a[1]) * c1 - c0 * a[2]) / det];
+}
+
+// IIR ordem 2, Forma Direta II Transposta (igual ao scipy.signal.lfilter).
+function lfilter(b: number[], a: number[], x: number[], zi: [number, number]): number[] {
+  let z0 = zi[0], z1 = zi[1];
+  const y = new Array<number>(x.length);
+  for (let n = 0; n < x.length; n++) {
+    const xn = x[n];
+    const yn = b[0] * xn + z0;
+    z0 = b[1] * xn + z1 - a[1] * yn;
+    z1 = b[2] * xn - a[2] * yn;
+    y[n] = yn;
+  }
+  return y;
+}
+
+// Extensão ímpar das bordas (scipy odd_ext) — reduz o transiente do filtfilt.
+function oddExt(x: number[], n: number): number[] {
+  const N = x.length;
+  const out: number[] = [];
+  for (let k = 0; k < n; k++) out.push(2 * x[0] - x[n - k]);
+  for (let i = 0; i < N; i++) out.push(x[i]);
+  for (let k = 0; k < n; k++) out.push(2 * x[N - 1] - x[N - 2 - k]);
+  return out;
+}
+
+// Filtragem zero-fase (forward-backward), equivalente ao scipy.signal.filtfilt com
+// padtype='odd' e padlen = 3*max(len(a),len(b)).
+function filtfilt(b: number[], a: number[], x: number[]): number[] {
+  const padlen = 3 * Math.max(a.length, b.length);
+  const ext = oddExt(x, padlen);
+  const zi = lfilterZi(b, a);
+  let y = lfilter(b, a, ext, [zi[0] * ext[0], zi[1] * ext[0]]);
+  y.reverse();
+  y = lfilter(b, a, y, [zi[0] * y[0], zi[1] * y[0]]);
+  y.reverse();
+  return y.slice(padlen, y.length - padlen);
+}
+
+// Ângulo de largada a partir do stream CRU da ESP (time, Angulo_graus) à TAXA PLENA.
+// REPRODUZ angulo_fio.py: passa-baixa Butterworth 5 Hz (fs estimado das amostras) +
+// find_peaks → maior pico. É o valor que bate com o script Python (não o pico do sinal
+// cru, que pega espigas de ruído). Sinal curto demais p/ filtrar → cai no pico cru.
+export function launchAngleFromRaw(samples: { time: number; Angulo_graus: number }[]): number {
+  if (samples.length === 0) return 0;
+  const angles = samples.map((s) => s.Angulo_graus);
+  if (samples.length <= 12) return +launchAnglePeak(angles).toFixed(2);
+  let sum = 0, cnt = 0;
+  for (let i = 1; i < samples.length; i++) {
+    const dt = samples[i].time - samples[i - 1].time;
+    if (dt > 0) { sum += dt; cnt++; }
+  }
+  const fs = cnt ? 1000 / (sum / cnt) : 125;
+  const Wn = (2 * 5) / fs; // corte 5 Hz / (fs/2)
+  if (!(Wn > 0 && Wn < 1)) return +launchAnglePeak(angles).toFixed(2);
+  const { b, a } = butterworthLowpass2(Wn);
+  const filt = filtfilt(b, a, angles);
+  return +launchAnglePeak(filt).toFixed(2);
+}
+
 // ── Ângulo de saída (findPeaks) ─────────────────────────────────────────────
 // Reproduz o algoritmo do angulo_fio.py: aplica bodyAngleCurve (que já suaviza
 // via regressão — equivale ao filtro passa-baixa do Python), encontra todos os
@@ -99,13 +178,23 @@ export function exitAnglePeak(curve: VelocityPoint[]): number {
 }
 
 // ── Velocidade de saída (média dos primeiros N pontos) ──────────────────────
-// Reproduz o ajuste_plot_vel.py: N_INICIO = 200, vel_saida = média dos
-// primeiros 200 valores de velocidade coletados.
-const N_EXIT_POINTS = 200;
+// Reproduz o ajuste_plot_vel.py: vel_saida = média dos primeiros N_INICIO valores
+// de velocidade coletados. MANTER igual ao N_INICIO do ajuste_plot_vel.py (= 1000).
+export const N_EXIT_POINTS = 1000;
 export function exitVelocityMean(curve: VelocityPoint[], n = N_EXIT_POINTS): number {
   const pts = curve.slice(0, n);
   if (pts.length === 0) return 0;
   return pts.reduce((s, p) => s + p.v, 0) / pts.length;
+}
+
+// Velocidade de saída EXATAMENTE como o ajuste_plot_vel.py:
+//   vel_saida = df['Vel_ms'].iloc[:N_INICIO].mean()
+// = média dos primeiros N_EXIT_POINTS valores de Vel_ms CRUS da ESP (literal, SEM
+// calibração — o `rawSamples` é o mesmo dado do CSV bruto). É o valor final mostrado.
+export function exitVelocityFromRaw(samples: { Vel_ms: number }[], n = N_EXIT_POINTS): number {
+  const pts = samples.slice(0, n);
+  if (pts.length === 0) return 0;
+  return pts.reduce((s, r) => s + r.Vel_ms, 0) / pts.length;
 }
 
 // ── Repetibilidade entre tentativas (consistência real) ────────────────────

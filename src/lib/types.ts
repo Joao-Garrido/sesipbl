@@ -19,10 +19,21 @@ export interface VelocityPoint {
   vy?: number; // componente vertical (m/s) — bounce do passo
 }
 
+// Amostra CRUA da ESP — exatamente as 5 colunas que o firmware (hardware_final.ino)
+// envia pela serial, sem reprocessamento. É o que se exporta no CSV "bruto" literal.
+export interface EspRawSample {
+  time: number; // millis() da ESP (ms)
+  Ax: number; // aceleração eixo X (g)
+  Angulo_graus: number; // ângulo já calculado no firmware (asin(ax)*180/PI)
+  Pulsos: number; // contagem acumulada do encoder
+  Vel_ms: number; // velocidade (m/s) calculada no firmware
+}
+
 export interface AttemptMetrics {
   peakVelocity: number;
   startAngle: number; // ângulo da largada (°)
   exitPeakVelocity?: number; // pico de velocidade nos primeiros 10% (saída do bloco, m/s)
+  exitMeanVelocity?: number; // vel. média de saída = média dos 1ºs 200 pts (ajuste_plot_vel.py)
   t10m?: number; // tempo até 10m (undefined se não cruzou 10m)
   t30m?: number;
   t100m?: number;
@@ -42,6 +53,9 @@ export interface Attempt {
   // importante é guardada à parte da velocityCurve (que cobre a prova inteira já
   // reduzida) para não perder amostras dos 10% iniciais. Ausente em dados antigos.
   exitCurve?: VelocityPoint[];
+  // Stream CRU da ESP à taxa plena, exatamente como recebido (time,Ax,Angulo_graus,
+  // Pulsos,Vel_ms), para exportar o CSV bruto literal. Ausente em dados antigos/demo.
+  rawSamples?: EspRawSample[];
   startedAt: number;
   finishedAt?: number;
   notes?: string;

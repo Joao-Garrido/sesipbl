@@ -91,27 +91,34 @@ export function exitPhaseToCsv(attempt: Attempt, info: (athleteId: string) => Cs
   return [header.map(esc), ...rows].map((r) => r.join(";")).join("\r\n");
 }
 
-// CSV bruto da curva de velocidade de uma tentativa — todos os pontos do encoder
-// (tempo, deslocamento, velocidade, aceleração). O treinador usa para análise
-// externa ou re-processamento em Python.
-export function rawCurveToCsv(attempt: Attempt, info: (athleteId: string) => CsvAthleteInfo): string {
-  const i = info(attempt.athleteId);
-  const prova = attempt.distance ?? 100;
-  const pts = attempt.velocityCurve;
-  const header = [
-    "Atleta", "Categoria", "Prova (m)", "Tentativa",
-    "Tempo (s)", "Deslocamento (m)", "Velocidade (m/s)", "Aceleração (m/s²)",
-  ];
-  const rows = pts.map((p) => [
-    esc(i.nome), esc(i.categoria), String(prova), String(attempt.numero),
-    num(p.t, 4), num(p.d ?? 0, 4), num(p.v, 4), num(p.a ?? 0, 4),
-  ]);
-  return [header.map(esc), ...rows].map((r) => r.join(";")).join("\r\n");
+// Cabeçalho do CSV bruto — EXATAMENTE as colunas que o firmware (hardware_final.ino)
+// imprime na serial, na mesma ordem.
+export const ESP_RAW_HEADER = "time,Ax,Angulo_graus,Pulsos,Vel_ms";
+
+// CSV BRUTO LITERAL da ESP: o stream cru da tentativa exatamente como chegou pela
+// serial — colunas time,Ax,Angulo_graus,Pulsos,Vel_ms, separador VÍRGULA e PONTO
+// decimal, com a mesma precisão do firmware (Ax 4, Ângulo 2, Vel 3 casas; time e
+// Pulsos inteiros). Sem colunas de atleta, sem reprocessamento, sem BOM — idêntico
+// ao log do server.py e ao que os scripts Python (angulo_fio.py, etc.) leem.
+export function espRawToCsv(attempt: Attempt, includeHeader = true): string {
+  const rows = attempt.rawSamples ?? [];
+  const lines = rows.map((r) =>
+    [
+      Math.round(r.time),
+      r.Ax.toFixed(4),
+      r.Angulo_graus.toFixed(2),
+      Math.round(r.Pulsos),
+      r.Vel_ms.toFixed(3),
+    ].join(",")
+  );
+  return includeHeader ? [ESP_RAW_HEADER, ...lines].join("\n") : lines.join("\n");
 }
 
-export function downloadCsv(filename: string, content: string): void {
-  // BOM p/ o Excel reconhecer UTF-8 (acentos).
-  const blob = new Blob(["﻿" + content], { type: "text/csv;charset=utf-8" });
+export function downloadCsv(filename: string, content: string, withBom = true): void {
+  // BOM p/ o Excel reconhecer UTF-8 (acentos). O CSV bruto literal passa withBom=false
+  // para ficar byte-idêntico ao log do server.py / ao que os scripts Python esperam.
+  const payload = withBom ? "﻿" + content : content;
+  const blob = new Blob([payload], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
