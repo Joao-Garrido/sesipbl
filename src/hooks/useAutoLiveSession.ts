@@ -1,14 +1,13 @@
 "use client";
 // Wrapper que escolhe a fonte de dados ao vivo em tempo de build:
 //   NEXT_PUBLIC_LOCAL_WS_URL definido  ->  WebSocket local (Python server.py)
-//   senao                              ->  Firebase RTDB / mock (comportamento original)
+//   senao                              ->  mock sintético (corrida simulada)
 //
 // O switch e feito por constante de modulo, entao o hook escolhido nunca muda
 // em runtime (compativel com Rules of Hooks).
 
 import { useLiveSession } from "./useLiveSession";
 import { useLocalLiveSession } from "./useLocalLiveSession";
-import { isFirebaseConfigured } from "@/lib/firebase";
 import type { LiveFrame, VelocityPoint, HardwareStatus } from "@/lib/types";
 
 export interface AutoLiveState {
@@ -33,10 +32,10 @@ export const useAutoLiveSession: (
       useLocalLiveSession(attemptId, athleteId, _WS_URL_NARROW)
   : (attemptId, _athleteId) => useLiveSession(attemptId);
 
-export const LIVE_SOURCE: "local-ws" | "firebase-or-mock" = LOCAL_WS_URL
+export const LIVE_SOURCE: "local-ws" | "mock" = LOCAL_WS_URL
   ? "local-ws"
-  : "firebase-or-mock";
+  : "mock";
 
-// Modo demo = sem WS local E sem Firebase: o stream é simulado (useLiveSession gera
-// uma corrida sintética). Nesse modo a tentativa NÃO deve ser salva como real.
-export const IS_DEMO: boolean = !LOCAL_WS_URL && !isFirebaseConfigured;
+// Modo demo = sem WS local: o stream é simulado (useLiveSession gera uma corrida
+// sintética). Nesse modo a tentativa NÃO deve ser salva como real.
+export const IS_DEMO: boolean = !LOCAL_WS_URL;

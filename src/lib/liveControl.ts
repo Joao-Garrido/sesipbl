@@ -1,8 +1,6 @@
-// Controle do bridge — site dispara início/fim de tentativa via RTDB.
-// O bridge Python escuta /control/active e começa/para o stream pro /live/{attemptId}.
-
-import { onValue, ref, remove, set } from "firebase/database";
-import { rtdb, isFirebaseConfigured } from "@/lib/firebase";
+// Controle de tentativa — no modo local-only (ESP WebSocket + mock) não há bridge
+// remoto. As funções de controle viram no-op e o status reporta sempre offline.
+// Assinaturas e tipos mantidos para os callers (LiveDashboard, useBridgeStatus).
 
 export interface AttemptControl {
   attemptId: string;
@@ -27,37 +25,19 @@ export function todaySessionId(athleteId: string): string {
 }
 
 export async function startAttemptControl(
-  attemptId: string,
-  athleteId: string,
-  sessionId?: string
+  _attemptId: string,
+  _athleteId: string,
+  _sessionId?: string
 ): Promise<void> {
-  if (!isFirebaseConfigured || !rtdb) return; // Mock mode: nada a fazer
-  const payload: AttemptControl = {
-    attemptId,
-    athleteId,
-    sessionId: sessionId ?? todaySessionId(athleteId),
-    status: "active",
-    startedAt: Date.now(),
-  };
-  await set(ref(rtdb, "control/active"), payload);
+  // Local-only: sem bridge remoto, nada a disparar.
 }
 
 export async function stopAttemptControl(): Promise<void> {
-  if (!isFirebaseConfigured || !rtdb) return;
-  // Bridge interpreta delete (null) como "finalize and save"
-  await remove(ref(rtdb, "control/active"));
+  // Local-only: sem bridge remoto, nada a finalizar.
 }
 
-/** Escuta o status reportado pelo bridge (idle | streaming | saving | offline). */
+/** No modo local-only não há bridge — reporta sempre offline. */
 export function subscribeBridgeStatus(cb: (s: BridgeStatus | null) => void): () => void {
-  if (!isFirebaseConfigured || !rtdb) {
-    cb({ status: "offline", ts: Date.now() });
-    return () => {};
-  }
-  const r = ref(rtdb, "control/bridge_status");
-  const unsub = onValue(r, (snap) => {
-    const val = snap.val();
-    cb(val as BridgeStatus | null);
-  });
-  return () => unsub();
+  cb({ status: "offline", ts: Date.now() });
+  return () => {};
 }

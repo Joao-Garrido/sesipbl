@@ -5,7 +5,6 @@
 
 import { useEffect, useState } from "react";
 import { subscribeBridgeStatus, type BridgeStatus } from "@/lib/liveControl";
-import { isFirebaseConfigured } from "@/lib/firebase";
 
 const STALE_HEARTBEAT_MS = 30_000;
 const RECHECK_INTERVAL_MS = 5_000;
@@ -33,5 +32,5 @@ export function useBridgeStatus(): {
     status.status !== "offline" &&
     Date.now() - status.ts < STALE_HEARTBEAT_MS;
 
-  return { status, isOnline, isFirebaseMode: isFirebaseConfigured };
+  return { status, isOnline, isFirebaseMode: false };
 }

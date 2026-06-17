@@ -1,8 +1,6 @@
 "use client";
-// Hook RTDB com fallback mock — emite dados processados + raw layer
+// Hook mock — gera corrida sintética; emite dados processados + raw layer
 import { useEffect, useRef, useState } from "react";
-import { onValue, ref } from "firebase/database";
-import { rtdb, isFirebaseConfigured } from "@/lib/firebase";
 import type { LiveFrame, VelocityPoint, HardwareStatus } from "@/lib/types";
 
 interface LiveState {
@@ -37,8 +35,8 @@ export function useLiveSession(attemptId: string | null): LiveState {
       return;
     }
 
-    if (!isFirebaseConfigured || !rtdb) {
-      setIsLive(true);
+    setIsLive(true);
+    {
       const t0 = Date.now();
       const peak = 8.2;
       pulseAccum.current = 0;
@@ -122,25 +120,6 @@ export function useLiveSession(attemptId: string | null): LiveState {
 
       return () => clearInterval(interval);
     }
-
-    const r = ref(rtdb, `live/${attemptId}`);
-    const unsub = onValue(r, (snap) => {
-      const f = snap.val() as LiveFrame | null;
-      if (!f) return;
-      setCurrent(f);
-      setIsLive(true);
-      setCurve((prev) => [...prev, { t: f.elapsed, v: f.velocity, a: f.acceleration, d: f.displacement, vx: f.vx, vy: f.vy }]);
-      setRawHistory((prev) => [f, ...prev].slice(0, 30));
-      setHardware({
-        encoder: "ok",
-        imu: "ok",
-        esp32: f.signalRssi < -75 ? "warn" : "ok",
-        rssi: f.signalRssi,
-        battery: Math.round(f.battery),
-        latencyMs: 18,
-      });
-    });
-    return () => unsub();
   }, [attemptId]);
 
   return { isLive, current, curve, rawHistory, hardware, calibrating: false };
