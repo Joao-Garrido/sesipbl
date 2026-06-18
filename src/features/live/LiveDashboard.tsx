@@ -30,7 +30,6 @@ import { StatCard } from "@/shared/components/StatCard";
 import { Header } from "@/shared/components/Header";
 import { Badge } from "@/shared/components/Badge";
 import { Chronometer } from "./Chronometer";
-import { HardwarePanel } from "./HardwarePanel";
 import { PhaseIndicator } from "./PhaseIndicator";
 import { DualMetricChart } from "./DualMetricChart";
 import { ExitVelocityChart } from "@/features/analysis/ExitVelocityChart";
@@ -57,7 +56,7 @@ function downsampleCurve(curve: VelocityPoint[], max: number): VelocityPoint[] {
 export function LiveDashboard() {
   const router = useRouter();
   const { athletes } = useAthletes();
-  const [athleteId, setAthleteId] = useState<string>("atl-teste");
+  const [athleteId, setAthleteId] = useState<string>("");
   const [attemptId, setAttemptId] = useState<string | null>(null);
   const [attemptNum, setAttemptNum] = useState(0);
   // Resultado do último encerramento — feedback explícito de salvamento + save manual.
@@ -330,7 +329,6 @@ export function LiveDashboard() {
               statusLabel={bridge.status?.status}
             />
           </div>
-          <HardwarePanel hw={hardware} />
         </motion.div>
 
         {signalLost && (
@@ -406,12 +404,6 @@ export function LiveDashboard() {
               icon={<HiOutlineBolt className="w-5 h-5" />}
             />
           </div>
-        </motion.div>
-
-        <motion.div variants={itemFade} className="grid grid-cols-3 gap-3">
-          <MicroStat label="Pulsos encoder" value={current?.encoderPulses ?? 0} unit="" mono />
-          <MicroStat label="Rotações" value={(current?.encoderRpm ?? 0).toFixed(0)} unit=" rpm" />
-          <MicroStat label="Deslocamento" value={(current?.displacement ?? 0).toFixed(2)} unit=" m" />
         </motion.div>
 
         {!attemptId && !frozen && (
@@ -582,14 +574,3 @@ function SaveResultBanner({
   );
 }
 
-function MicroStat({ label, value, unit, mono = false }: { label: string; value: string | number; unit: string; mono?: boolean }) {
-  return (
-    <div className="bg-white rounded-lg border border-border px-4 py-3 flex flex-col gap-0.5">
-      <span className="text-[10px] uppercase tracking-widest text-text-muted font-bold">{label}</span>
-      <span className={`text-lg font-bold tabular-nums ${mono ? "font-mono-num" : ""}`}>
-        {value}
-        <span className="text-xs text-text-muted font-normal">{unit}</span>
-      </span>
-    </div>
-  );
-}

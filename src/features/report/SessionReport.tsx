@@ -11,7 +11,6 @@ import {
   smoothCurveVelocity,
   N_EXIT_POINTS,
 } from "@/lib/analysis";
-import { getCalibration } from "@/lib/calibration";
 import type { Attempt, VelocityPoint } from "@/lib/types";
 import { Card } from "@/shared/components/Card";
 import { Header } from "@/shared/components/Header";
@@ -19,7 +18,6 @@ import { Badge } from "@/shared/components/Badge";
 import { ComparisonChart } from "./ComparisonChart";
 import { AttemptsTable } from "./AttemptsTable";
 import { PhaseProfile } from "./PhaseProfile";
-import { ExitVelocityChart } from "@/features/analysis/ExitVelocityChart";
 import { HiOutlineDocumentArrowDown, HiOutlineTableCells } from "react-icons/hi2";
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis,
@@ -42,7 +40,7 @@ function modeDistance(attempts: Attempt[]): number {
 
 export function SessionReport() {
   const { athletes } = useAthletes();
-  const [athleteId, setAthleteId] = useState<string>("atl-teste");
+  const [athleteId, setAthleteId] = useState<string>("");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [bootstrapped, setBootstrapped] = useState(false);
   const sessions = useSessions(athleteId);
@@ -121,32 +119,31 @@ export function SessionReport() {
     return runs[runs.length - 1] ?? attempts[attempts.length - 1];
   }, [runs, attempts]);
 
-  // Saída = janela dos 1ºs N_EXIT_POINTS pontos (mesma do /live e do ajuste_plot_vel.py,
-  // NÃO os 10%). Reconstrói {t,v,d} do stream CRU à taxa plena (rawSamples) e suaviza.
-  // Sem rawSamples (dados antigos), cai na curva inteira suavizada como fallback.
+  // Gráfico = reprodução do ajuste_plot_vel.py: velocidade × TEMPO com média móvel
+  // CENTRADA de janela 12 (Vel_media_movel) sobre o stream cru completo. O número no
+  // badge é a vel. média de saída (1ºs N_EXIT_POINTS). Sem rawSamples (dados antigos),
+  // cai na curva salva suavizada como fallback.
   const featuredExit = useMemo(() => {
-    if (!featured) return { pts: [] as VelocityPoint[], window: 0, mean: null as number | null };
-    const mpp = getCalibration("firmware").metersPerPulse; // d só p/ o eixo X do traçado
+    if (!featured) return { pts: [] as VelocityPoint[], mean: null as number | null };
     const raw = featured.rawSamples ?? [];
-    let pts;
+    let pts: VelocityPoint[];
     if (raw.length) {
-      const slice = raw.slice(0, N_EXIT_POINTS);
-      const t0 = slice[0].time, p0 = slice[0].Pulsos;
-      pts = smoothCurveVelocity(
-        slice.map((r) => ({
-          t: +((r.time - t0) / 1000).toFixed(3),
-          v: r.Vel_ms,
-          d: +Math.max(0, (r.Pulsos - p0) * mpp).toFixed(3),
-        })),
-      );
+      const t0 = raw[0].time;
+      const W = 12, half = Math.floor(W / 2); // = JANELA_MEDIA_MOVEL do ajuste_plot_vel.py
+      pts = raw.map((r, i) => {
+        let sum = 0, c = 0;
+        for (let j = Math.max(0, i - half); j <= Math.min(raw.length - 1, i + half - 1); j++) {
+          sum += raw[j].Vel_ms; c++;
+        }
+        return { t: +((r.time - t0) / 1000).toFixed(3), v: +(sum / c).toFixed(3) };
+      });
     } else {
       pts = smoothCurveVelocity(featured.velocityCurve);
     }
-    const window = pts.length ? (pts[pts.length - 1].d ?? 0) : 0;
     const mean =
       featured.metrics.exitMeanVelocity ??
       (raw.length ? +exitVelocityFromRaw(raw).toFixed(2) : null);
-    return { pts, window, mean };
+    return { pts, mean };
   }, [featured]);
   // Curva da tentativa em destaque com a VELOCIDADE suavizada (média móvel) — só p/ os
   // gráficos de velocidade não "pularem" com os degraus de ~100 ms da Vel_ms do firmware.
@@ -359,7 +356,15 @@ export function SessionReport() {
                   ) : undefined
                 }
               >
-                <ExitVelocityChart points={featuredExit.pts} windowM={featuredExit.window} showPeak={false} />
+                <ResponsiveContainer width="100%" height={260}>
+                  <LineChart data={featuredExit.pts} margin={{ top: 10, right: 16, left: -4, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis dataKey="t" type="number" domain={[0, "dataMax"]} tick={{ fontSize: 11 }} tickFormatter={(v) => `${(+v).toFixed(0)}s`} label={{ value: "Tempo (s)", position: "insideBottomRight", offset: -2, fontSize: 10 }} />
+                    <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${v} m/s`} />
+                    <RTooltip formatter={(v: number) => [`${v.toFixed(2)} m/s`, "Velocidade"]} labelFormatter={(t) => `${Number(t).toFixed(2)} s`} />
+                    <Line type="monotone" dataKey="v" stroke="#4682B4" strokeWidth={2} dot={false} isAnimationActive={false} />
+                  </LineChart>
+                </ResponsiveContainer>
               </Card>
             </div>
 

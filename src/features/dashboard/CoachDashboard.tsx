@@ -42,7 +42,7 @@ type Metric = "peakVelocity" | "bestT100m" | "consistency";
 
 export function CoachDashboard() {
   const { athletes } = useAthletes();
-  const [athleteId, setAthleteId] = useState<string>("atl-teste");
+  const [athleteId, setAthleteId] = useState<string>("");
   const [metric, setMetric] = useState<Metric>("peakVelocity");
   const [progressView, setProgressView] = useState<"sessao" | "tentativa">("sessao");
 

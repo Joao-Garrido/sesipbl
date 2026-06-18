@@ -1,26 +1,12 @@
-// Mock data — esvaziado. Sem mais João Garrido / Carlos Mendes / Ana Silva
-// nem PRs fake, sessoes fake, ranking fake.
-//
-// Mantemos APENAS um atleta placeholder (necessario porque o LiveDashboard
-// precisa de pelo menos um item no dropdown). Os demais hooks/components
-// recebem arrays vazios e devem renderizar estado vazio.
-//
-// Quando Firebase estiver configurado OU quando o backend local tiver
-// persistencia de atletas/historico, os dados reais sobrescrevem isto.
+// Mock data — VAZIO. Sem atletas/sessões/PRs fake. O treinador cadastra os atletas
+// reais em "Atletas"; o histórico vem do backend local (data/store.json).
+// (Antes havia um "Atleta Teste" placeholder — removido a pedido; ver localStore,
+//  que também filtra o id legado "atl-teste" de dados já salvos.)
 
 import type { Athlete, Attempt, Session, VelocityPoint } from "./types";
 
-// --- atleta placeholder unico ---
-export const mockAthletes: Athlete[] = [
-  {
-    id: "atl-teste",
-    nome: "Atleta Teste",
-    categoria: "—",
-    numeroAtleta: "0",
-    referenciaAngulo: 45,
-    referenciaVelocidade: 0,
-  },
-];
+// --- sem atleta placeholder ---
+export const mockAthletes: Athlete[] = [];
 
 // --- bio (vazio) ---
 export interface AthleteBio {

@@ -21,6 +21,10 @@ const KEYS = {
 
 const CHANGE_EVENT = "bel-grupo:store-change";
 
+// Id do antigo atleta placeholder "Atleta Teste". É FILTRADO de toda a app (lista de
+// atletas e tentativas) — some da UI e, no próximo sync, sai do store.json também.
+const LEGACY_TEST_ID = "atl-teste";
+
 // Base HTTP do backend local, derivada da URL do WebSocket.
 // ws://localhost:8000/ws -> http://localhost:8000
 const WS_URL = process.env.NEXT_PUBLIC_LOCAL_WS_URL || "";
@@ -128,12 +132,10 @@ export async function hydrateFromDisk(): Promise<void> {
 export function getAthletes(): Athlete[] {
   if (!hasWindow()) return mockAthletes;
   const raw = window.localStorage.getItem(KEYS.athletes);
-  if (raw == null) {
-    writeLocal(KEYS.athletes, mockAthletes); // semeia o placeholder SEM push (disco manda)
-    return mockAthletes;
-  }
+  if (raw == null) return mockAthletes; // vazio agora (sem placeholder de teste)
   try {
-    return JSON.parse(raw) as Athlete[];
+    // Filtra o atleta teste legado, caso já tenha sido salvo antes.
+    return (JSON.parse(raw) as Athlete[]).filter((a) => a.id !== LEGACY_TEST_ID);
   } catch {
     return mockAthletes;
   }
@@ -162,7 +164,8 @@ export function deleteAthlete(id: string): void {
 // Tentativas
 // ----------------------------------------------------------------
 export function getAttempts(): Attempt[] {
-  return readRaw<Attempt[]>(KEYS.attempts, []);
+  // Filtra as tentativas do atleta teste legado (saem da comparação, sessões e relatórios).
+  return readRaw<Attempt[]>(KEYS.attempts, []).filter((a) => a.athleteId !== LEGACY_TEST_ID);
 }
 
 function saveAttempts(list: Attempt[]): void {

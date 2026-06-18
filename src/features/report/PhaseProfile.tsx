@@ -1,7 +1,7 @@
 "use client";
-// Perfil de velocidade média por trecho — derivado da velocidade + deslocamento.
-// 4 divisões IGUAIS da distância da prova (lib/phases), sem nome de fase — cada quarto
-// mostra a velocidade média naquela faixa, adaptando-se à distância selecionada.
+// Perfil de velocidade média por trecho — 4 divisões IGUAIS da distância da prova
+// (lib/phases). Cada barra é rotulada só pelo METRO FINAL do quarto (ex.: prova de 20m
+// → 5, 10, 15, 20 m) e mostra a velocidade média até ali. Adapta-se à distância.
 import type { Attempt } from "@/lib/types";
 import { buildPhases, fmtMeters } from "@/lib/phases";
 
@@ -17,27 +17,21 @@ function phaseColor(vel: number): string {
 }
 
 export function PhaseProfile({ attempt }: Props) {
-  // Velocidade média por fase a partir da curva (faixas de deslocamento da prova)
-  const phases = buildPhases(attempt.distance ?? 100).map((p) => {
-    const faixa = `${fmtMeters(p.lo)}–${fmtMeters(p.hi)}m`;
-    return { label: p.label ? `${p.label} (${faixa})` : faixa, range: [p.lo, p.hi] as [number, number] };
-  });
-
-  const velByPhase = phases.map((p) => {
-    const pts = attempt.velocityCurve.filter((pt) => (pt.d ?? 0) >= p.range[0] && (pt.d ?? 0) < p.range[1]);
-    if (pts.length === 0) return { ...p, vel: 0 };
-    const vel = pts.reduce((sum, pt) => sum + pt.v, 0) / pts.length;
-    return { ...p, vel };
+  // Velocidade média em cada um dos 4 quartos (faixas iguais de deslocamento).
+  const velByPhase = buildPhases(attempt.distance ?? 100).map((p) => {
+    const pts = attempt.velocityCurve.filter((pt) => (pt.d ?? 0) >= p.lo && (pt.d ?? 0) < p.hi);
+    const vel = pts.length ? pts.reduce((sum, pt) => sum + pt.v, 0) / pts.length : 0;
+    return { hi: p.hi, vel };
   });
 
   const max = Math.max(...velByPhase.map((p) => p.vel), 10);
 
   return (
     <div className="space-y-3">
-      {velByPhase.map((p) => (
-        <div key={p.label}>
+      {velByPhase.map((p, i) => (
+        <div key={i}>
           <div className="flex items-center justify-between text-xs mb-1">
-            <span className="text-text-muted">{p.label}</span>
+            <span className="text-text-muted tabular-nums">{fmtMeters(p.hi)}m</span>
             <span className="font-semibold tabular-nums">{p.vel.toFixed(1)} m/s</span>
           </div>
           <div className="h-2 rounded-full bg-track-50 overflow-hidden">
