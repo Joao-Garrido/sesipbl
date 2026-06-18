@@ -1,6 +1,6 @@
 "use client";
 import type { Attempt } from "@/lib/types";
-import { exitPeakVelocity } from "@/lib/analysis";
+import { exitVelocityFromRaw } from "@/lib/analysis";
 import { Badge, perfLevel } from "@/shared/components/Badge";
 import { HiOutlineTableCells } from "react-icons/hi2";
 
@@ -37,15 +37,17 @@ export function AttemptsTable({ attempts, onDownloadRaw }: Props) {
             const tFinal = a.metrics.tFinal ?? a.metrics.t100m; // compat dados antigos
             // distância REAL percorrida (máx. da curva) — ex.: 2,45m numa parcial
             const reached = a.velocityCurve.length ? Math.max(...a.velocityCurve.map((p) => p.d ?? 0)) : 0;
-            // pico da saída (1ºs 10%): métrica salva; cai pra curva em dados antigos.
-            const exitPeak = a.metrics.exitPeakVelocity ?? exitPeakVelocity(a.velocityCurve, a.distance ?? 100);
+            // vel. de saída = média dos 1ºs N_EXIT_POINTS pts (igual ao resto). Recalcula
+            // do stream cru quando há (usa o N atual e bate com o ajuste_plot_vel.py); sem
+            // stream cru, cai na métrica salva.
+            const exitMean = a.rawSamples?.length ? exitVelocityFromRaw(a.rawSamples) : (a.metrics.exitMeanVelocity ?? null);
             return (
               <tr key={a.id} className="border-b border-border/60 hover:bg-track-50/30">
                 <td className="py-2.5 px-3 font-semibold">{a.numero}</td>
                 <td className="py-2.5 px-3 tabular-nums text-text-muted">{a.distance ?? 100}m</td>
                 <td className="py-2.5 px-3 tabular-nums font-semibold">{reached.toFixed(2)}m</td>
                 <td className="py-2.5 px-3 tabular-nums">{a.metrics.peakVelocity.toFixed(1)} <span className="text-text-muted">m/s</span></td>
-                <td className="py-2.5 px-3 tabular-nums">{exitPeak > 0 ? <>{exitPeak.toFixed(1)} <span className="text-text-muted">m/s</span></> : "—"}</td>
+                <td className="py-2.5 px-3 tabular-nums">{exitMean != null ? <>{exitMean.toFixed(1)} <span className="text-text-muted">m/s</span></> : "—"}</td>
                 <td className="py-2.5 px-3 tabular-nums">{a.metrics.startAngle}°</td>
                 <td className="py-2.5 px-3 tabular-nums">{a.metrics.t10m != null ? `${a.metrics.t10m.toFixed(2)}s` : "—"}</td>
                 <td className="py-2.5 px-3 tabular-nums">{tFinal != null ? `${tFinal.toFixed(2)}s` : "—"}</td>

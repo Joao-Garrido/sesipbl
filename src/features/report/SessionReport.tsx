@@ -140,9 +140,11 @@ export function SessionReport() {
     } else {
       pts = smoothCurveVelocity(featured.velocityCurve);
     }
-    const mean =
-      featured.metrics.exitMeanVelocity ??
-      (raw.length ? +exitVelocityFromRaw(raw).toFixed(2) : null);
+    // Recalcula do stream cru (usa o N atual e bate com o ajuste_plot_vel.py); sem
+    // stream cru, cai na métrica salva.
+    const mean = raw.length
+      ? +exitVelocityFromRaw(raw).toFixed(2)
+      : (featured.metrics.exitMeanVelocity ?? null);
     return { pts, mean };
   }, [featured]);
   // Curva da tentativa em destaque com a VELOCIDADE suavizada (média móvel) — só p/ os
@@ -321,7 +323,7 @@ export function SessionReport() {
 
             {/* Perfil por fase + ângulos */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <Card title="Perfil de Velocidade por Fase">
+              <Card title="Perfil de Velocidade por Trecho">
                 {featured ? <PhaseProfile attempt={featured} /> : <p className="text-sm text-text-muted">Sem dados.</p>}
               </Card>
               <Card title="Histórico de Ângulo na Largada">

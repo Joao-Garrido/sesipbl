@@ -179,8 +179,8 @@ export function exitAnglePeak(curve: VelocityPoint[]): number {
 
 // ── Velocidade de saída (média dos primeiros N pontos) ──────────────────────
 // Reproduz o ajuste_plot_vel.py: vel_saida = média dos primeiros N_INICIO valores
-// de velocidade coletados. MANTER igual ao N_INICIO do ajuste_plot_vel.py (= 1000).
-export const N_EXIT_POINTS = 1000;
+// de velocidade coletados. MANTER igual ao N_INICIO do ajuste_plot_vel.py (= 200).
+export const N_EXIT_POINTS = 200;
 export function exitVelocityMean(curve: VelocityPoint[], n = N_EXIT_POINTS): number {
   const pts = curve.slice(0, n);
   if (pts.length === 0) return 0;
