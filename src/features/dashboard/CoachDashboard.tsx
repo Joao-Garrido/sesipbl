@@ -26,7 +26,6 @@ import { RecentAttempts } from "./RecentAttempts";
 import { AthleteSwitcher } from "./AthleteSwitcher";
 import { AthleteBioCard } from "./AthleteBioCard";
 import { TrainingLoadChart } from "./TrainingLoadChart";
-import { PRTimeline } from "./PRTimeline";
 
 // Entrada enxuta: o dashboard é pesado (vários gráficos), então a animação é
 // curta pra a troca de tela (/live -> /inicio) parecer instantânea.
@@ -55,7 +54,7 @@ export function CoachDashboard() {
 
   const athlete = athletes.find((a) => a.id === athleteId);
   const stats = useAthleteStats(athleteId);
-  const { history, attemptSeries, bio, prs, todayAttempts: attempts } = stats;
+  const { history, attemptSeries, bio, todayAttempts: attempts } = stats;
 
   const last = history[history.length - 1];
   const prev = history[history.length - 2] ?? history[0]; // sessão imediatamente anterior
@@ -249,8 +248,8 @@ export function CoachDashboard() {
           </Card>
         </motion.section>
 
-        {/* Training load + PRs */}
-        <motion.section variants={itemFade} className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Training load */}
+        <motion.section variants={itemFade}>
           <Card title="Volume de Treino" headerRight={<Badge variant="critical" size="sm">{history.length} sessões</Badge>}>
             <TrainingLoadChart data={history} />
             <div className="grid grid-cols-3 gap-2 mt-2 text-[10px] text-text-muted">
@@ -258,9 +257,6 @@ export function CoachDashboard() {
               <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm" style={{ background: "#B91C2C" }} />ideal (3–4)</div>
               <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm" style={{ background: "#6B1019" }} />muito (5+)</div>
             </div>
-          </Card>
-          <Card title="Recordes Pessoais" headerRight={<Badge variant="critical" size="sm" dot>{prs.length}</Badge>}>
-            <PRTimeline prs={prs} />
           </Card>
         </motion.section>
 
