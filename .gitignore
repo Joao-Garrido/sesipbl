@@ -17,6 +17,10 @@ logs/
 local-mvp/data/
 teste.pdf
 
+# Exceção: dados de coleta de exemplo (1 tentativa por CSV) versionados de propósito
+!dados_coletas/
+!dados_coletas/*.csv
+
 # ===== Env locais (segredos/config da máquina) =====
 .env
 .env.local
