@@ -197,6 +197,32 @@ export function exitVelocityFromRaw(samples: { Vel_ms: number }[], n = N_EXIT_PO
   return pts.reduce((s, r) => s + r.Vel_ms, 0) / pts.length;
 }
 
+// Suaviza só a VELOCIDADE de uma curva com média móvel centrada de ~spanS segundos
+// (mesma ideia do Vel_media_movel do ajuste_plot_vel.py). A Vel_ms do firmware atualiza
+// a cada ~100 ms → o sinal cru é uma escada que "pula"; isto vira linha contínua para o
+// TRAÇADO dos gráficos. Não mexe em t/d nem nos dados salvos/métricas. A janela se adapta
+// à densidade da curva (estima o dt médio), então funciona com 300 ou 1000 pontos.
+export function smoothCurveVelocity(curve: VelocityPoint[], spanS = 0.35): VelocityPoint[] {
+  const n = curve.length;
+  if (n < 3) return curve;
+  let dtSum = 0, dtN = 0;
+  for (let i = 1; i < n; i++) {
+    const dt = curve[i].t - curve[i - 1].t;
+    if (dt > 0) { dtSum += dt; dtN++; }
+  }
+  const dt = dtN ? dtSum / dtN : 0.008;
+  const half = Math.max(1, Math.round((spanS / 2) / dt));
+  const out: VelocityPoint[] = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const lo = Math.max(0, i - half);
+    const hi = Math.min(n - 1, i + half);
+    let sum = 0, c = 0;
+    for (let j = lo; j <= hi; j++) { sum += curve[j].v; c++; }
+    out[i] = { ...curve[i], v: c ? +(sum / c).toFixed(3) : curve[i].v };
+  }
+  return out;
+}
+
 // ── Repetibilidade entre tentativas (consistência real) ────────────────────
 // Mede o quanto as tentativas de uma sessão se PARECEM entre si, via coeficiente
 // de variação (CV = desvio-padrão populacional / média). Score = (1 - CV) em %.

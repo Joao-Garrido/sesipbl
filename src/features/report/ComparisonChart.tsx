@@ -1,8 +1,8 @@
 "use client";
 // Overlay de tentativas de UMA prova (mesma distância). Velocidade × DESLOCAMENTO,
 // eixo X = distância da prova (sem espaço vazio). A tentativa COMPLETA mais recente
-// fica destacada; as PARCIAIS (não chegaram ao fim) aparecem tracejadas, nunca como
-// "campeã". Com zoom por arraste.
+// fica destacada (teal); as PARCIAIS (não chegaram ao fim) aparecem como linha
+// VERMELHA sólida, nunca como "campeã". Com zoom por arraste.
 import {
   CartesianGrid,
   Legend,
@@ -15,6 +15,7 @@ import {
   YAxis,
 } from "recharts";
 import type { Attempt } from "@/lib/types";
+import { smoothCurveVelocity } from "@/lib/analysis";
 import { useChartZoom, ZoomControls } from "@/hooks/useChartZoom";
 
 interface ComparisonChartProps {
@@ -24,19 +25,24 @@ interface ComparisonChartProps {
 
 export function ComparisonChart({ attempts, distance }: ComparisonChartProps) {
   const maxD = Math.max(1, distance);
-  // Resolução fina (~240 pontos) pra a curva e o tooltip ficarem FLUIDOS, não em
-  // degraus de 1 em 1 metro. O passo se adapta à distância da prova.
-  const POINTS = 240;
+  // Resolução fina (~480 pontos) pra a curva ficar fluida. O passo se adapta à distância.
+  const POINTS = 480;
   const STEP = Math.max(0.02, maxD / POINTS);
+
+  // Suaviza a velocidade de cada tentativa (média móvel, mesma ideia do Vel_media_movel
+  // do ajuste_plot_vel.py): a Vel_ms do firmware atualiza a cada ~100 ms → o sinal cru é
+  // uma escada que "pula"; a média móvel vira linha contínua. SÓ o traçado — dados salvos,
+  // CSV bruto e métricas ficam intactos.
+  const series = attempts.map((a) => ({ key: `T${a.numero}`, curve: smoothCurveVelocity(a.velocityCurve) }));
 
   const data: Record<string, number>[] = [];
   const nBins = Math.ceil(maxD / STEP);
   for (let i = 0; i <= nBins; i++) {
     const d = +Math.min(maxD, i * STEP).toFixed(3);
     const row: Record<string, number> = { d };
-    attempts.forEach((a) => {
-      const pt = a.velocityCurve.find((p) => (p.d ?? 0) >= d);
-      if (pt) row[`T${a.numero}`] = pt.v;
+    series.forEach(({ key, curve }) => {
+      const pt = curve.find((p) => (p.d ?? 0) >= d);
+      if (pt) row[key] = pt.v;
     });
     data.push(row);
   }
@@ -69,12 +75,13 @@ export function ComparisonChart({ attempts, distance }: ComparisonChartProps) {
             return (
               <Line
                 key={a.id}
-                type="monotone"
+                type="natural"
                 dataKey={`T${a.numero}`}
                 name={`T${a.numero}${isParcial ? " (parcial)" : ""}`}
-                stroke={isLatest ? "#2D4F4F" : isParcial ? "#CBD5E1" : "#9CA3AF"}
-                strokeWidth={isLatest ? 2.5 : 1.5}
-                strokeDasharray={isParcial ? "5 4" : undefined}
+                // parcial = linha VERMELHA sólida (mais fácil de ver que o tracejado antigo);
+                // completa mais recente = teal destacado; demais completas = cinza.
+                stroke={isLatest ? "#2D4F4F" : isParcial ? "#DC2626" : "#9CA3AF"}
+                strokeWidth={isLatest ? 2.5 : isParcial ? 2 : 1.5}
                 dot={false}
                 isAnimationActive={false}
                 connectNulls

@@ -1,6 +1,7 @@
 "use client";
-// Perfil de velocidade média por fase — derivado da velocidade + deslocamento.
-// As faixas acompanham a distância da prova (lib/phases): longas nomeadas, curtas só faixa.
+// Perfil de velocidade média por trecho — derivado da velocidade + deslocamento.
+// 4 divisões IGUAIS da distância da prova (lib/phases), sem nome de fase — cada quarto
+// mostra a velocidade média naquela faixa, adaptando-se à distância selecionada.
 import type { Attempt } from "@/lib/types";
 import { buildPhases, fmtMeters } from "@/lib/phases";
 

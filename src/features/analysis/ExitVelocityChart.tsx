@@ -14,12 +14,13 @@ import {
 import type { VelocityPoint } from "@/lib/types";
 
 interface Props {
-  points: VelocityPoint[]; // já filtrados aos primeiros 10%
-  windowM?: number; // limite dos 10% (m) — fixa o eixo X
+  points: VelocityPoint[]; // pontos da janela de saída
+  windowM?: number; // limite da janela (m) — fixa o eixo X
   height?: number;
+  showPeak?: boolean; // marca o pico de velocidade (default true)
 }
 
-export function ExitVelocityChart({ points, windowM, height = 240 }: Props) {
+export function ExitVelocityChart({ points, windowM, height = 240, showPeak = true }: Props) {
   if (points.length < 2) {
     return (
       <div className="flex items-center justify-center text-sm text-text-muted" style={{ height }}>
@@ -56,9 +57,11 @@ export function ExitVelocityChart({ points, windowM, height = 240 }: Props) {
           labelFormatter={(d) => `${(+d).toFixed(2)} m`}
           formatter={(v: number) => [`${v.toFixed(2)} m/s`, "Velocidade"]}
         />
-        <Area type="monotone" dataKey="v" stroke="#B91C2C" strokeWidth={2.5} fill="url(#exitVelFill)" isAnimationActive={false} />
-        <ReferenceDot x={peak.d} y={peak.v} r={4} fill="#B91C2C" stroke="#fff" strokeWidth={1.5} isFront
-          label={{ value: `pico ${peak.v.toFixed(2)} m/s`, fontSize: 10, fill: "#B91C2C", position: "top" }} />
+        <Area type="natural" dataKey="v" stroke="#B91C2C" strokeWidth={2.5} fill="url(#exitVelFill)" isAnimationActive={false} />
+        {showPeak && (
+          <ReferenceDot x={peak.d} y={peak.v} r={4} fill="#B91C2C" stroke="#fff" strokeWidth={1.5} isFront
+            label={{ value: `pico ${peak.v.toFixed(2)} m/s`, fontSize: 10, fill: "#B91C2C", position: "top" }} />
+        )}
       </ComposedChart>
     </ResponsiveContainer>
   );

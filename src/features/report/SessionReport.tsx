@@ -5,16 +5,14 @@ import { useAthletes } from "@/hooks/useAthletes";
 import { useAttempts } from "@/hooks/useAttempts";
 import { useSessions } from "@/hooks/useSessions";
 import * as store from "@/lib/localStore";
-import { attemptsToCsv, exitPhaseToCsv, espRawToCsv, downloadCsv } from "@/lib/exportCsv";
+import { attemptsToCsv, espRawToCsv, downloadCsv } from "@/lib/exportCsv";
 import {
-  bodyAngleCurve,
-  exitPeakVelocity,
   exitVelocityFromRaw,
-  exitPhasePoints,
-  exitWindowMeters,
+  smoothCurveVelocity,
   N_EXIT_POINTS,
 } from "@/lib/analysis";
-import type { Attempt } from "@/lib/types";
+import { getCalibration } from "@/lib/calibration";
+import type { Attempt, VelocityPoint } from "@/lib/types";
 import { Card } from "@/shared/components/Card";
 import { Header } from "@/shared/components/Header";
 import { Badge } from "@/shared/components/Badge";
@@ -22,7 +20,6 @@ import { ComparisonChart } from "./ComparisonChart";
 import { AttemptsTable } from "./AttemptsTable";
 import { PhaseProfile } from "./PhaseProfile";
 import { ExitVelocityChart } from "@/features/analysis/ExitVelocityChart";
-import { BodyAngleChart } from "@/features/analysis/BodyAngleChart";
 import { HiOutlineDocumentArrowDown, HiOutlineTableCells } from "react-icons/hi2";
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis,
@@ -124,32 +121,39 @@ export function SessionReport() {
     return runs[runs.length - 1] ?? attempts[attempts.length - 1];
   }, [runs, attempts]);
 
-  // Saída do bloco (1ºs 10%) e ângulo do corpo da tentativa em destaque — derivados da
-  // curva. Usa exitCurve (alta densidade) quando existe; senão filtra a curva geral.
+  // Saída = janela dos 1ºs N_EXIT_POINTS pontos (mesma do /live e do ajuste_plot_vel.py,
+  // NÃO os 10%). Reconstrói {t,v,d} do stream CRU à taxa plena (rawSamples) e suaviza.
+  // Sem rawSamples (dados antigos), cai na curva inteira suavizada como fallback.
   const featuredExit = useMemo(() => {
-    if (!featured) return { pts: [], window: 0, peak: 0, mean: null as number | null };
-    const dist = featured.distance ?? 100;
-    const pts = featured.exitCurve?.length ? featured.exitCurve : exitPhasePoints(featured.velocityCurve, dist);
-    // Vel. média de saída (1ºs N_EXIT_POINTS pts) — IGUAL ao dashboard. Usa a métrica salva; em dados
-    // antigos sem ela, recalcula do stream CRU (taxa plena) se existir; senão fica indisponível.
-    // NÃO dá pra reconstituir da velocityCurve (reduzida a 300 pts da prova inteira → daria outro valor).
+    if (!featured) return { pts: [] as VelocityPoint[], window: 0, mean: null as number | null };
+    const mpp = getCalibration("firmware").metersPerPulse; // d só p/ o eixo X do traçado
+    const raw = featured.rawSamples ?? [];
+    let pts;
+    if (raw.length) {
+      const slice = raw.slice(0, N_EXIT_POINTS);
+      const t0 = slice[0].time, p0 = slice[0].Pulsos;
+      pts = smoothCurveVelocity(
+        slice.map((r) => ({
+          t: +((r.time - t0) / 1000).toFixed(3),
+          v: r.Vel_ms,
+          d: +Math.max(0, (r.Pulsos - p0) * mpp).toFixed(3),
+        })),
+      );
+    } else {
+      pts = smoothCurveVelocity(featured.velocityCurve);
+    }
+    const window = pts.length ? (pts[pts.length - 1].d ?? 0) : 0;
     const mean =
       featured.metrics.exitMeanVelocity ??
-      (featured.rawSamples?.length
-        ? +exitVelocityFromRaw(featured.rawSamples).toFixed(2)
-        : null);
-    return {
-      pts,
-      window: exitWindowMeters(dist),
-      peak: featured.metrics.exitPeakVelocity ?? exitPeakVelocity(featured.velocityCurve, dist),
-      mean,
-    };
+      (raw.length ? +exitVelocityFromRaw(raw).toFixed(2) : null);
+    return { pts, window, mean };
   }, [featured]);
-  const featuredBodyAngle = useMemo(
-    () => (featured ? bodyAngleCurve(featured.velocityCurve) : []),
+  // Curva da tentativa em destaque com a VELOCIDADE suavizada (média móvel) — só p/ os
+  // gráficos de velocidade não "pularem" com os degraus de ~100 ms da Vel_ms do firmware.
+  const featuredSmooth = useMemo(
+    () => (featured ? smoothCurveVelocity(featured.velocityCurve) : []),
     [featured],
   );
-
   const currentSession = sessions.find((s) => s.id === sessionId);
   const dataLabel = currentSession
     ? new Date(currentSession.data + "T00:00:00").toLocaleDateString("pt-BR")
@@ -165,14 +169,6 @@ export function SessionReport() {
     const stamp = new Date().toISOString().slice(0, 10);
     const nome = (athlete?.nome ?? "atleta").replace(/\s+/g, "_");
     downloadCsv(`tentativas_${nome}_${stamp}.csv`, attemptsToCsv(list, infoOf));
-  }
-
-  // CSV ponto-a-ponto da saída do bloco (todos os pontos dos 1ºs 10%) da tentativa em destaque.
-  function exportExitCsv() {
-    if (!featured) return;
-    const stamp = new Date(featured.startedAt).toISOString().slice(0, 10);
-    const nome = (athlete?.nome ?? "atleta").replace(/\s+/g, "_");
-    downloadCsv(`saida_10pct_${nome}_T${featured.numero}_${stamp}.csv`, exitPhaseToCsv(featured, infoOf));
   }
 
   // CSV BRUTO literal da ESP de UMA tentativa (time,Ax,Angulo_graus,Pulsos,Vel_ms),
@@ -316,8 +312,8 @@ export function SessionReport() {
               )}
               <p className="text-xs text-text-muted mt-2">
                 Prova de <span className="font-semibold">{provaDistance ?? "—"}m</span>. Tentativa completa mais recente em{" "}
-                <span className="font-semibold" style={{ color: "#2D4F4F" }}>verde-petróleo</span>; demais em cinza;{" "}
-                <span className="font-semibold">parciais tracejadas</span>.
+                <span className="font-semibold" style={{ color: "#2D4F4F" }}>verde-petróleo</span>; demais completas em cinza;{" "}
+                <span className="font-semibold" style={{ color: "#DC2626" }}>parciais em vermelho</span>.
               </p>
             </Card>
 
@@ -353,42 +349,17 @@ export function SessionReport() {
               </Card>
             </div>
 
-            {/* Saída do bloco (1ºs 10%) + ângulo do corpo da tentativa em destaque */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Saída do bloco — 1ºs N_EXIT_POINTS pontos da tentativa em destaque */}
+            <div>
               <Card
                 title={`Velocidade na Saída do Bloco${featured ? ` · T${featured.numero}` : ""}`}
                 headerRight={
-                  <div className="flex items-center gap-2">
-                    {featuredExit.mean != null && (
-                      <Badge variant="primary" size="sm">média {N_EXIT_POINTS} pts {featuredExit.mean.toFixed(2)} m/s</Badge>
-                    )}
-                    {featuredExit.peak > 0 && (
-                      <Badge variant="critical" size="sm">pico {featuredExit.peak.toFixed(2)} m/s</Badge>
-                    )}
-                    <button
-                      onClick={exportExitCsv}
-                      disabled={!featured || featuredExit.pts.length < 2}
-                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold border border-border hover:bg-track-50 transition disabled:opacity-40 print:hidden"
-                      title="Exportar todos os pontos dos primeiros 10% em CSV"
-                    >
-                      <HiOutlineTableCells className="w-3.5 h-3.5" /> CSV pontos
-                    </button>
-                  </div>
+                  featuredExit.mean != null ? (
+                    <Badge variant="primary" size="sm">média {N_EXIT_POINTS} pts · {featuredExit.mean.toFixed(2)} m/s</Badge>
+                  ) : undefined
                 }
               >
-                <ExitVelocityChart points={featuredExit.pts} windowM={featuredExit.window} />
-                <p className="text-[11px] text-text-muted mt-2">
-                  Velocidade instantânea nos primeiros 10% da prova ({featuredExit.window.toFixed(1)} m) — a fase de saída do bloco. O CSV traz todos os pontos da fase.
-                  {featuredExit.mean != null && (
-                    <> <span className="font-semibold">Vel. média de saída (1ºs {N_EXIT_POINTS} pts) = {featuredExit.mean.toFixed(2)} m/s</span> — mesmo valor do painel ao vivo (reproduz o ajuste_plot_vel.py).</>
-                  )}
-                </p>
-              </Card>
-              <Card title={`Ângulo do Corpo durante a corrida${featured ? ` · T${featured.numero}` : ""}`}>
-                <BodyAngleChart points={featuredBodyAngle} />
-                <p className="text-[11px] text-text-muted mt-2">
-                  Modelo de inclinação por aceleração: <span className="font-semibold">90° = corpo ereto</span>. Começa acima de 90° na saída (tronco inclinado) e converge para 90° quando a velocidade estabiliza.
-                </p>
+                <ExitVelocityChart points={featuredExit.pts} windowM={featuredExit.window} showPeak={false} />
               </Card>
             </div>
 
@@ -397,23 +368,23 @@ export function SessionReport() {
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                 <Card title={`Velocidade × Tempo · T${featured.numero}`}>
                   <ResponsiveContainer width="100%" height={220}>
-                    <LineChart data={featured.velocityCurve}>
+                    <LineChart data={featuredSmooth}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                       <XAxis dataKey="t" tick={{ fontSize: 10 }} label={{ value: "Tempo (s)", position: "insideBottomRight", offset: -2, fontSize: 10 }} />
                       <YAxis tick={{ fontSize: 10 }} label={{ value: "m/s", angle: -90, position: "insideLeft", fontSize: 10 }} />
                       <RTooltip formatter={(v: number) => [`${v.toFixed(2)} m/s`, "Velocidade"]} labelFormatter={(t: number) => `${Number(t).toFixed(2)} s`} />
-                      <Line type="monotone" dataKey="v" stroke="#2D4F4F" dot={false} strokeWidth={1.5} />
+                      <Line type="natural" dataKey="v" stroke="#2D4F4F" dot={false} strokeWidth={1.5} />
                     </LineChart>
                   </ResponsiveContainer>
                 </Card>
                 <Card title={`Velocidade × Distância · T${featured.numero}`}>
                   <ResponsiveContainer width="100%" height={220}>
-                    <LineChart data={featured.velocityCurve}>
+                    <LineChart data={featuredSmooth}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                       <XAxis dataKey="d" tick={{ fontSize: 10 }} label={{ value: "Distância (m)", position: "insideBottomRight", offset: -2, fontSize: 10 }} />
                       <YAxis tick={{ fontSize: 10 }} label={{ value: "m/s", angle: -90, position: "insideLeft", fontSize: 10 }} />
                       <RTooltip formatter={(v: number) => [`${v.toFixed(2)} m/s`, "Velocidade"]} labelFormatter={(d: number) => `${Number(d ?? 0).toFixed(2)} m`} />
-                      <Line type="monotone" dataKey="v" stroke="#B91C1C" dot={false} strokeWidth={1.5} />
+                      <Line type="natural" dataKey="v" stroke="#B91C1C" dot={false} strokeWidth={1.5} />
                     </LineChart>
                   </ResponsiveContainer>
                 </Card>

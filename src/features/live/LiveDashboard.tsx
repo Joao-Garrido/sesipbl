@@ -16,13 +16,11 @@ import { useAthletes } from "@/hooks/useAthletes";
 import { useBridgeStatus } from "@/hooks/useBridgeStatus";
 import { startAttemptControl, stopAttemptControl, todaySessionId } from "@/lib/liveControl";
 import { saveAttempt, getAttemptsBySession } from "@/lib/localStore";
-import { buildPhases, fmtMeters } from "@/lib/phases";
 import {
-  bodyAngleCurve,
   exitPeakVelocity,
   exitVelocityFromRaw,
   exitPhasePoints,
-  exitWindowMeters,
+  smoothCurveVelocity,
   launchAngleFromRaw,
   N_EXIT_POINTS,
 } from "@/lib/analysis";
@@ -33,12 +31,9 @@ import { Header } from "@/shared/components/Header";
 import { Badge } from "@/shared/components/Badge";
 import { Chronometer } from "./Chronometer";
 import { HardwarePanel } from "./HardwarePanel";
-import { RawStreamTicker } from "./RawStreamTicker";
 import { PhaseIndicator } from "./PhaseIndicator";
-import { SplitsTable } from "./SplitsTable";
 import { DualMetricChart } from "./DualMetricChart";
 import { ExitVelocityChart } from "@/features/analysis/ExitVelocityChart";
-import { BodyAngleChart } from "@/features/analysis/BodyAngleChart";
 
 const containerStagger = {
   animate: { transition: { staggerChildren: 0.05 } },
@@ -82,7 +77,7 @@ export function LiveDashboard() {
   const [launchAngle, setLaunchAngle] = useState(0);
 
   const athlete = athletes.find((a) => a.id === athleteId);
-  const { isLive, current: liveCurrent, curve: liveCurve, rawHistory: liveRaw, hardware, calibrating, getRawSamples } = useAutoLiveSession(attemptId, athleteId);
+  const { isLive, current: liveCurrent, curve: liveCurve, hardware, calibrating, getRawSamples } = useAutoLiveSession(attemptId, athleteId);
   const bridge = useBridgeStatus();
 
   // Congela a última tentativa: ao encerrar, o hook zera o stream (attemptId=null).
@@ -90,13 +85,11 @@ export function LiveDashboard() {
   const [frozen, setFrozen] = useState<{
     current: LiveFrame | null;
     curve: VelocityPoint[];
-    rawHistory: LiveFrame[];
   } | null>(null);
 
   // Valores exibidos: snapshot congelado tem prioridade sobre o stream vivo (vazio pós-stop).
   const current = frozen ? frozen.current : liveCurrent;
   const curve = frozen ? frozen.curve : liveCurve;
-  const rawHistory = frozen ? frozen.rawHistory : liveRaw;
 
   // Sinal perdido durante a captura: socket caiu (isLive=false) OU parou de chegar
   // frame (>2s → hardware "fail"). Só depois do 1º frame, pra não piscar no início.
@@ -116,47 +109,19 @@ export function LiveDashboard() {
     return { peakVelTime: peakVel.t };
   }, [curve]);
 
-  // Fases dependem da distância (ver lib/phases): provas longas (>=60m) usam fases
-  // físicas nomeadas; provas curtas (<60m) viram trechos iguais SEM nome.
-  const phases = useMemo(() => {
-    const firstTimeAt = (m: number): number | null => {
-      const p = curve.find((pt) => (pt.d ?? 0) >= m);
-      return p ? p.t : null;
-    };
-    const avgVelBetween = (d0: number, d1: number): number => {
-      const pts = curve.filter((p) => (p.d ?? 0) >= d0 && (p.d ?? 0) < d1);
-      return pts.length ? pts.reduce((s, p) => s + p.v, 0) / pts.length : 0;
-    };
-    return buildPhases(distance).map((d) => {
-      const tA = d.lo === 0 ? 0 : firstTimeAt(d.lo);
-      const tB = firstTimeAt(d.hi);
-      return {
-        label: d.label,
-        range: `${fmtMeters(d.lo)}–${fmtMeters(d.hi)}m`,
-        endM: d.hi,
-        vel: avgVelBetween(d.lo, d.hi),
-        t: tA != null && tB != null ? tB - tA : null,
-      };
-    });
-  }, [curve, distance]);
-
   // Curva amostrada (≤800 pts) só para os gráficos — mantém o render leve. A curva
   // completa (`curve`) segue intacta para métricas e salvamento.
   const chartCurve = useMemo(() => downsampleCurve(curve, 800), [curve]);
 
-  // Saída do bloco (primeiros 10% da prova) — a fase mais importante. Pontos da fase
-  // p/ o gráfico (curva amostrada) e o pico de velocidade (da curva completa, exato).
-  const exitWindow = useMemo(() => exitWindowMeters(distance), [distance]);
-  const exitPts = useMemo(() => exitPhasePoints(chartCurve, distance), [chartCurve, distance]);
-  const exitPeak = useMemo(() => exitPeakVelocity(curve, distance), [curve, distance]);
+  // Saída = os 1ºs N_EXIT_POINTS pontos (mesma janela do ajuste_plot_vel.py, NÃO os 10%).
+  // O gráfico mostra a velocidade (suavizada) desse trecho; windowM = distância no fim dele.
+  const exitSlice = useMemo(() => curve.slice(0, N_EXIT_POINTS), [curve]);
+  const exitPts = useMemo(() => smoothCurveVelocity(downsampleCurve(exitSlice, 800)), [exitSlice]);
+  const exitWindowM = exitSlice.length ? (exitSlice[exitSlice.length - 1].d ?? 0) : 0;
   // Vel. de saída EXATA do ajuste_plot_vel.py: média dos 1ºs N_EXIT_POINTS valores de
   // Vel_ms CRUS da ESP (rawSamples, sem calibração). Recalcula conforme o stream cresce.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const exitMean = useMemo(() => exitVelocityFromRaw(getRawSamples()), [curve]);
-
-  // Curva do ângulo do corpo (modelo de inclinação por aceleração — ver lib/analysis).
-  const bodyAngle = useMemo(() => bodyAngleCurve(chartCurve), [chartCurve]);
-  const currentBodyAngle = bodyAngle.length ? bodyAngle[bodyAngle.length - 1].angle : 90;
 
   // Ângulo de largada: recalcula do stream CRU completo da ESP (taxa plena) a cada
   // novo frame, com o mesmo filtro do angulo_fio.py — assim o valor exibido BATE com
@@ -239,7 +204,7 @@ export function LiveDashboard() {
       // só "completa" se cruzou a distância-alvo; senão é parcial (encerrada antes)
       status: reachedTarget ? "completa" : "parcial",
       metrics,
-      velocityCurve: downsampleCurve(full, 300),
+      velocityCurve: downsampleCurve(full, 1000),
       // saída do bloco em alta densidade (≤200 pts só dos 1ºs 10%): a fase mais
       // importante não perde amostras como na velocityCurve (reduzida p/ a prova toda).
       exitCurve: downsampleCurve(exitPhasePoints(full, distance), 200),
@@ -270,7 +235,7 @@ export function LiveDashboard() {
       setSaveResult({ status: "empty", attempt: null, maxD: 0, peak: 0, points: curve.length });
     }
     // congela os valores vivos para o treinador revisar (sobrevive ao setAttemptId(null))
-    setFrozen({ current: liveCurrent, curve: liveCurve, rawHistory: liveRaw });
+    setFrozen({ current: liveCurrent, curve: liveCurve });
     setAttemptId(null);
     try {
       await stopAttemptControl();
@@ -422,22 +387,14 @@ export function LiveDashboard() {
           </Card>
         </motion.div>
 
-        {/* Saída do bloco (primeiros 10%) — velocidade instantânea da fase + pico */}
+        {/* Saída do bloco — velocidade nos 1ºs N_EXIT_POINTS pontos (janela do ajuste_plot_vel.py) */}
         <motion.div variants={itemFade} className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <Card
             title="Velocidade na Saída do Bloco"
             className="lg:col-span-2"
-            headerRight={
-              <div className="flex items-center gap-2">
-                <Badge variant="primary" size="sm">1ºs 10% · {fmtMeters(exitWindow)}m</Badge>
-                {exitPeak > 0 && <Badge variant="critical" size="sm">pico {exitPeak.toFixed(2)} m/s</Badge>}
-              </div>
-            }
+            headerRight={<Badge variant="primary" size="sm">1ºs {N_EXIT_POINTS} pts</Badge>}
           >
-            <ExitVelocityChart points={exitPts} windowM={exitWindow} />
-            <p className="text-[11px] text-text-muted mt-2">
-              Velocidade instantânea nos primeiros 10% da prova ({fmtMeters(exitWindow)} m) — a fase de saída do bloco, a mais importante para a arrancada.
-            </p>
+            <ExitVelocityChart points={exitPts} windowM={exitWindowM} showPeak={false} />
           </Card>
           <div className="space-y-3">
             <StatCard
@@ -448,61 +405,7 @@ export function LiveDashboard() {
               large
               icon={<HiOutlineBolt className="w-5 h-5" />}
             />
-            <StatCard
-              label="Pico de saída (1ºs 10%)"
-              value={exitPeak}
-              unit=" m/s"
-              reference={athlete?.referenciaVelocidade}
-              icon={<HiOutlineBolt className="w-5 h-5" />}
-            />
           </div>
-        </motion.div>
-
-        {/* Ângulo do corpo ao longo da corrida (modelo de inclinação por aceleração) */}
-        <motion.div variants={itemFade}>
-          <Card
-            title="Ângulo do Corpo durante a corrida"
-            headerRight={<Badge variant="primary" size="sm">ao vivo {currentBodyAngle.toFixed(0)}°</Badge>}
-          >
-            <BodyAngleChart points={bodyAngle} />
-            <p className="text-[11px] text-text-muted mt-2">
-              Modelo biomecânico de inclinação por aceleração: <span className="font-semibold">90° = corpo ereto</span>. Começa acima de 90° na saída (tronco inclinado, aceleração alta) e converge para 90° quando a velocidade estabiliza.
-            </p>
-          </Card>
-        </motion.div>
-
-        {/* Metricas por fase — velocidade media em cada faixa */}
-        <motion.div variants={itemFade}>
-          <Card title="Métricas por Fase" headerRight={<Badge variant="primary" size="sm">0–{distance}m</Badge>}>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              {phases.map((p) => (
-                <PhaseStat
-                  key={p.range}
-                  label={p.label}
-                  range={p.range}
-                  vel={p.vel}
-                  t={p.t}
-                  done={(current?.displacement ?? 0) >= p.endM}
-                />
-              ))}
-            </div>
-            <p className="text-[11px] text-text-muted mt-3">
-              Vel média em cada faixa de distância. Tentativa encerra automaticamente em {distance}m.
-            </p>
-          </Card>
-        </motion.div>
-
-        <motion.div variants={itemFade} className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2">
-            <Card title="Stream RAW · ESP32" noPadding>
-              <div className="p-3">
-                <RawStreamTicker frames={rawHistory} />
-              </div>
-            </Card>
-          </div>
-          <Card title="Parciais" headerRight={<span className="text-xs text-text-muted font-mono-num tabular-nums">{(current?.displacement ?? 0).toFixed(1)}m</span>}>
-            <SplitsTable curve={curve} displacement={current?.displacement ?? 0} target={distance} />
-          </Card>
         </motion.div>
 
         <motion.div variants={itemFade} className="grid grid-cols-3 gap-3">
@@ -613,35 +516,6 @@ function DistanceSelector({
         aria-label="Distância customizada (m)"
       />
       <span className="text-[10px] text-text-muted pr-1">m</span>
-    </div>
-  );
-}
-
-function PhaseStat({
-  label, range, vel, t, done,
-}: {
-  label: string;
-  range: string;
-  vel: number;
-  t: number | null;
-  done: boolean;
-}) {
-  return (
-    <div className={`rounded-lg border p-3 flex flex-col gap-1 ${done ? "bg-sesi-red-50 border-sesi-red-100" : "bg-white border-border"}`}>
-      <div className="flex items-center justify-between">
-        {/* Provas curtas não têm nome de fase → mostra a faixa como título */}
-        <span className="text-[11px] uppercase tracking-widest text-text-muted font-bold">{label || range}</span>
-        {label ? <span className="text-[10px] text-text-muted font-mono-num">{range}</span> : null}
-      </div>
-      <div className="flex items-baseline gap-1">
-        <span className="text-xl font-bold tabular-nums">
-          {vel > 0 ? vel.toFixed(2) : "—"}
-        </span>
-        {vel > 0 && <span className="text-xs text-text-muted">m/s</span>}
-      </div>
-      <span className="text-[11px] text-text-muted tabular-nums">
-        {t != null ? `${t.toFixed(2)}s` : "—"}
-      </span>
     </div>
   );
 }
